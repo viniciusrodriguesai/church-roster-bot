@@ -170,6 +170,9 @@ def upgrade() -> None:
     with op.batch_alter_table(
         "assignments", recreate="always" if op.get_bind().dialect.name == "sqlite" else "auto"
     ) as batch:
+        batch.alter_column(
+            "status", existing_type=sa.String(16), type_=sa.String(24), existing_nullable=False
+        )
         batch.drop_constraint("valid_assignment_status", type_="check")
         batch.create_check_constraint(
             "valid_assignment_status",
@@ -208,6 +211,9 @@ def downgrade() -> None:
         batch.drop_constraint("valid_assignment_status", type_="check")
         batch.create_check_constraint(
             "valid_assignment_status", "status IN ('confirmed', 'cancelled')"
+        )
+        batch.alter_column(
+            "status", existing_type=sa.String(24), type_=sa.String(16), existing_nullable=False
         )
     op.create_index(
         "uq_confirmed_assignment_per_slot_volunteer",

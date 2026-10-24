@@ -30,9 +30,14 @@ from church_roster_bot.scheduling.lifecycle import (
     transition_assignment,
     transition_schedule,
 )
-from church_roster_bot.scheduling.models import Assignment, ReplacementRequest, ThirdDayRequest
+from church_roster_bot.scheduling.models import (
+    Assignment,
+    MonthlySchedule,
+    ReplacementRequest,
+    ThirdDayRequest,
+)
 from church_roster_bot.scripts.simulate import simulate
-from church_roster_bot.services.models import Slot
+from church_roster_bot.services.models import Slot, WorshipService
 from church_roster_bot.whatsapp.client import MetaSendError, WhatsAppClient
 from church_roster_bot.whatsapp.models import InboundEvent, OutboundMessage
 from church_roster_bot.whatsapp.payloads import parse_message, text_payload
@@ -652,3 +657,86 @@ def test_delivery_status_does_not_regress_when_events_arrive_out_of_order(roster
     Worker(session_factory=factory).process_one()
     with factory() as db:
         assert db.scalar(select(OutboundMessage.status)) == "read"
+
+
+def test_failed_manual_replacement_keeps_original_and_pending_request(roster):
+    engine, factory, ids = roster
+    first = add(engine, ids)
+    unauthorized = add(engine, ids, SECOND, roles=[ids["open"]])
+    _, slot_id = open_service(roster)
+    assignment_id = engine.assign(first, slot_id)
+    with factory.begin() as db:
+        request_id = request_replacement(db, first, assignment_id)
+    send(factory, COORD, "MENU")
+    send(factory, COORD, "7")
+    send(factory, COORD, f"SUBSTITUIR {request_id} {unauthorized}")
+    assert "Não foi possível" in bodies(send(factory, COORD, "SIM"))
+    with factory() as db:
+        assert db.get(Assignment, assignment_id).status == "replacement_requested"
+        assert db.get(ReplacementRequest, request_id).status == "pending"
+        assert db.scalar(select(func.count(Assignment.id))) == 1
+
+
+def test_reservation_confirmation_revalidates_permissions_and_rolls_back_failure(roster):
+    engine, factory, ids = roster
+    member = add(engine, ids, roles=[ids["open"]])
+    _, slot_id = open_service(roster)
+    with factory.begin() as db:
+        reservation = Assignment(
+            volunteer_id=member, slot_id=slot_id, status="pending_confirmation"
+        )
+        db.add(reservation)
+        db.flush()
+        reservation_id = reservation.id
+        with pytest.raises(RosterError):
+            transition_assignment(reservation, "confirmed")
+    with factory.begin() as db:
+        with pytest.raises(RosterError):
+            engine.confirm_reservation(reservation_id, db=db)
+    with factory() as db:
+        assert db.get(Assignment, reservation_id).status == "pending_confirmation"
+    with factory.begin() as db:
+        db.add(VolunteerRole(volunteer_id=member, role_id=ids["offer"]))
+    assert engine.confirm_reservation(reservation_id) == reservation_id
+    with factory() as db:
+        assert db.get(Assignment, reservation_id).status == "confirmed"
+
+
+def test_roster_engine_rejects_new_registration_on_closed_schedule(roster):
+    engine, factory, ids = roster
+    member = add(engine, ids)
+    _, slot_id = open_service(roster)
+    with factory.begin() as db:
+        schedule = db.scalar(select(MonthlySchedule))
+        transition_schedule(schedule, "closed")
+    with pytest.raises(RosterError):
+        engine.assign(member, slot_id)
+
+
+def test_duplicate_member_registration_returns_safe_error_and_keeps_inbox_processed(roster):
+    engine, factory, ids = roster
+    add(engine, ids)
+    for message in ("MENU", "1", "NOVO", "Outra Pessoa", FIRST, str(ids["offer"])):
+        send(factory, COORD, message)
+    reply = bodies(send(factory, COORD, "SIM"))
+    assert "já existe" in reply
+    assert "INSERT" not in reply
+    with factory() as db:
+        assert db.scalar(select(func.count(Volunteer.id))) == 1
+        assert set(db.scalars(select(InboundEvent.status))) == {"processed"}
+
+
+def test_coordinator_edits_empty_service_and_cannot_move_assigned_service(roster):
+    engine, factory, ids = roster
+    member = add(engine, ids)
+    service_id, slot_id = open_service(roster)
+    for message in ("MENU", "2", f"EDITAR {service_id}", "HORA 20:00", "SIM"):
+        send(factory, COORD, message)
+    with factory() as db:
+        assert db.get(WorshipService, service_id).start_time.hour == 20
+    engine.assign(member, slot_id)
+    for message in ("MENU", "2", f"EDITAR {service_id}", "HORA 21:00"):
+        send(factory, COORD, message)
+    assert "Não foi possível" in bodies(send(factory, COORD, "SIM"))
+    with factory() as db:
+        assert db.get(WorshipService, service_id).start_time.hour == 20

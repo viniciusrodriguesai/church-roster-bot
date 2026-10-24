@@ -33,7 +33,7 @@ class Assignment(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     slot_id: Mapped[int] = mapped_column(ForeignKey("slots.id"), nullable=False)
     volunteer_id: Mapped[int] = mapped_column(ForeignKey("volunteers.id"), nullable=False)
-    status: Mapped[str] = mapped_column(String(16), nullable=False, default="confirmed")
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="confirmed")
     exception_id: Mapped[int | None] = mapped_column(
         ForeignKey("third_day_requests.id"), nullable=True
     )

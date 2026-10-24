@@ -12,6 +12,7 @@ from church_roster_bot.administration.service import (
     add_ministry,
     add_role,
     edit_coordinator,
+    edit_service,
     edit_volunteer,
     rename_ministry,
     set_church_timezone,
@@ -28,13 +29,14 @@ from church_roster_bot.scheduling.lifecycle import (
     SCHEDULE_TRANSITIONS,
     audit,
     format_schedule,
+    invitation_text,
     manual_replace,
     publish_schedule,
     schedule_for,
     set_slot_capacity,
     transition_schedule,
 )
-from church_roster_bot.scheduling.models import Assignment, ReplacementRequest
+from church_roster_bot.scheduling.models import Assignment, ReplacementRequest, ThirdDayRequest
 from church_roster_bot.services.models import Slot, WorshipService
 from church_roster_bot.whatsapp.payloads import buttons_payload, normalize_phone, text_payload
 
@@ -58,7 +60,7 @@ class AdminConversationMixin:
                 self._text(db, phone, "Diáconos: NOVO, LISTAR ou EDITAR <id>.")
             elif upper == "2":
                 self._state(session, "admin_service_date")
-                self._text(db, phone, "Data do novo culto: AAAA-MM-DD")
+                self._text(db, phone, "Data do novo culto: AAAA-MM-DD, ou EDITAR <culto_id>.")
             elif upper == "3":
                 self._state(session, "admin_slot_pick")
                 self._text(db, phone, "ID da vaga para alterar capacidade:")
@@ -202,9 +204,46 @@ class AdminConversationMixin:
                 self._text(db, phone, "Alteração descartada.")
             self._state(session, "admin_members")
         elif state == "admin_service_date":
+            if upper.startswith("EDITAR "):
+                service_id = int(text.split()[1])
+                service = db.get(WorshipService, service_id)
+                if service is None or service.ministry_id != ministry.id:
+                    raise RosterError("culto fora do ministério autorizado")
+                self._state(session, "admin_service_edit", service_id=service_id)
+                self._text(db, phone, "Informe DATA AAAA-MM-DD ou HORA HH:MM.")
+                return
             service_date = date.fromisoformat(text)
             self._state(session, "admin_service_time", service_date=service_date.isoformat())
             self._text(db, phone, "Horário do culto: HH:MM")
+        elif state == "admin_service_edit":
+            command, value = text.split(" ", 1)
+            field = {"DATA": "date", "HORA": "time"}.get(command.upper())
+            if field is None:
+                raise RosterError("use DATA ou HORA")
+            self._state(session, "admin_service_edit_confirm", field=field, value=value.strip())
+            self._send(
+                db,
+                phone,
+                buttons_payload(
+                    f"Alterar {field} do culto #{data['service_id']} para {value.strip()}?",
+                    [("SIM", "Salvar"), ("NAO", "Cancelar")],
+                ),
+            )
+        elif state == "admin_service_edit_confirm":
+            if upper == "SIM":
+                edit_service(
+                    db,
+                    ministry.id,
+                    data["service_id"],
+                    data["field"],
+                    data["value"],
+                    actor_type,
+                    actor_id,
+                )
+                self._text(db, phone, "Culto atualizado.")
+            else:
+                self._text(db, phone, "Alteração descartada.")
+            self._state(session, "menu")
         elif state == "admin_service_time":
             start_time = time.fromisoformat(text)
             self._state(session, "admin_service_caps", start_time=start_time.strftime("%H:%M"))
@@ -430,10 +469,7 @@ class AdminConversationMixin:
                     self._send(
                         db,
                         member.phone_e164,
-                        text_payload(
-                            f"Convite excepcional #{request_id}. "
-                            f"Envie ACEITAR {request_id} ou RECUSAR {request_id}."
-                        ),
+                        text_payload(invitation_text(db, db.get(ThirdDayRequest, request_id))),
                         proactive=True,
                     )
                 self._text(
@@ -459,8 +495,21 @@ class AdminConversationMixin:
                 )
                 self._text(db, phone, f"Substituição confirmada. Nova participação #{new_id}.")
                 request = db.get(ReplacementRequest, data["request_id"])
-                slot = db.get(Slot, db.get(Assignment, request.assignment_id).slot_id)
+                original = db.get(Assignment, request.assignment_id)
+                slot = db.get(Slot, original.slot_id)
                 service = db.get(WorshipService, slot.service_id)
+                for volunteer_id in (original.volunteer_id, data["member_id"]):
+                    member = db.get(Volunteer, volunteer_id)
+                    if member.invite_opt_in:
+                        self._send(
+                            db,
+                            member.phone_e164,
+                            text_payload(
+                                f"Substituição confirmada para {service.service_date:%d/%m/%Y} "
+                                f"às {service.start_time:%H:%M}. Consulte sua escala pelo MENU."
+                            ),
+                            proactive=True,
+                        )
                 schedule = schedule_for(db, ministry.id, service.service_date)
                 if schedule and schedule.state == "published":
                     version = db.scalar(

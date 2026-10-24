@@ -1,5 +1,5 @@
 from collections.abc import Callable, Mapping
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
 from itertools import combinations
@@ -26,7 +26,7 @@ from church_roster_bot.scheduling.errors import (
     RosterError,
     Unavailable,
 )
-from church_roster_bot.scheduling.models import Assignment, ThirdDayRequest
+from church_roster_bot.scheduling.models import Assignment, MonthlySchedule, ThirdDayRequest
 from church_roster_bot.services.models import Slot, WorshipService
 
 SessionFactory = Callable[[], Session]
@@ -54,10 +54,21 @@ class RosterEngine:
     def __init__(self, session_factory: SessionFactory):
         self.session_factory = session_factory
 
+    @contextmanager
+    def _transaction(self, db: Session | None):
+        if db is None:
+            with self.session_factory.begin() as session:
+                yield session
+        else:
+            # A chat handler can catch domain errors and still commit its reply.
+            # Roll back the failed operation before that outer transaction commits.
+            with db.begin_nested():
+                yield db
+
     def register_volunteer(
         self, church_id: int, data: VolunteerCreate, *, db: Session | None = None
     ) -> int:
-        with self.session_factory.begin() if db is None else nullcontext(db) as db:
+        with self._transaction(db) as db:
             if not self._roles_belong_to_church(db, church_id, data.role_ids):
                 raise RoleMismatch("every role must belong to this church")
             member = Volunteer(
@@ -76,7 +87,7 @@ class RosterEngine:
     ) -> list[int]:
         if start > end:
             raise RosterError("start date must precede end date")
-        with self.session_factory.begin() if db is None else nullcontext(db) as db:
+        with self._transaction(db) as db:
             member = db.get(Volunteer, volunteer_id, with_for_update=True)
             if member is None:
                 raise NotFound("volunteer not found")
@@ -104,7 +115,7 @@ class RosterEngine:
     ) -> int:
         if not capacities or any(capacity <= 0 for capacity in capacities.values()):
             raise RosterError("each configured role requires positive capacity")
-        with self.session_factory.begin() if db is None else nullcontext(db) as db:
+        with self._transaction(db) as db:
             ministry = db.get(Ministry, ministry_id)
             if ministry is None:
                 raise NotFound("ministry not found")
@@ -131,9 +142,20 @@ class RosterEngine:
             return service.id
 
     def assign(self, volunteer_id: int, slot_id: int, *, db: Session | None = None) -> int:
-        with self.session_factory.begin() if db is None else nullcontext(db) as db:
+        with self._transaction(db) as db:
             member, slot = self._lock_member_slot(db, volunteer_id, slot_id)
             return self._assign_locked(db, member, slot)
+
+    def confirm_reservation(self, assignment_id: int, *, db: Session | None = None) -> int:
+        with self._transaction(db) as db:
+            assignment = db.get(Assignment, assignment_id)
+            if assignment is None or assignment.status != "pending_confirmation":
+                raise RosterError("participation is not pending confirmation")
+            member, slot = self._lock_member_slot(db, assignment.volunteer_id, assignment.slot_id)
+            # Exclude this reservation from its own duplicate/capacity/day checks.
+            assignment.status = "cancelled"
+            db.flush()
+            return self._assign_locked(db, member, slot, reservation=assignment)
 
     def request_third_day(
         self,
@@ -146,7 +168,7 @@ class RosterEngine:
     ) -> int:
         if not justification.strip():
             raise RosterError("a third-day request requires a justification")
-        with self.session_factory.begin() if db is None else nullcontext(db) as db:
+        with self._transaction(db) as db:
             member, slot = self._lock_member_slot(db, volunteer_id, slot_id)
             coordinator = db.get(Coordinator, coordinator_id)
             if (
@@ -182,7 +204,7 @@ class RosterEngine:
     def respond_third_day(
         self, volunteer_id: int, request_id: int, accept: bool, *, db: Session | None = None
     ) -> int | None:
-        with self.session_factory.begin() if db is None else nullcontext(db) as db:
+        with self._transaction(db) as db:
             original = db.get(ThirdDayRequest, request_id)
             if original is None or original.volunteer_id != volunteer_id:
                 raise NotAuthorized("invitation not found for this volunteer")
@@ -305,8 +327,20 @@ class RosterEngine:
         *,
         allow_third: bool = False,
         request_id: int | None = None,
+        allow_published: bool = False,
+        reservation: Assignment | None = None,
     ) -> int:
         service = db.get(WorshipService, slot.service_id)
+        schedule = db.scalar(
+            select(MonthlySchedule).where(
+                MonthlySchedule.ministry_id == service.ministry_id,
+                MonthlySchedule.year == service.service_date.year,
+                MonthlySchedule.month == service.service_date.month,
+            )
+        )
+        allowed_states = {"open", "published"} if allow_published or allow_third else {"open"}
+        if schedule is not None and schedule.state not in allowed_states:
+            raise RosterError("schedule does not accept this operation")
         self._check_eligibility(db, member, slot, service)
         occupied = (
             db.scalar(
@@ -334,7 +368,10 @@ class RosterEngine:
         )
         if not already_on_day and days >= (3 if allow_third else 2):
             raise MonthlyLimit("monthly day limit reached")
-        assignment = Assignment(slot_id=slot.id, volunteer_id=member.id, exception_id=request_id)
+        assignment = reservation or Assignment(
+            slot_id=slot.id, volunteer_id=member.id, exception_id=request_id
+        )
+        assignment.status = "confirmed"
         db.add(assignment)
         db.flush()
         return assignment.id
@@ -345,6 +382,9 @@ class RosterEngine:
         ministry = db.get(Ministry, service.ministry_id)
         if ministry.church_id != member.church_id:
             raise RoleMismatch("volunteer belongs to another church")
+        role = db.get(Role, slot.role_id)
+        if role is None or not role.active:
+            raise RoleMismatch("role is not active")
         if (
             db.scalar(
                 select(VolunteerRole.id).where(

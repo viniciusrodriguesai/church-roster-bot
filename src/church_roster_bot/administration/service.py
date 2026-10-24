@@ -1,6 +1,6 @@
 """Authorized writes for conversation flows."""
 
-from datetime import date
+from datetime import date, time
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import func, select
@@ -16,7 +16,7 @@ from church_roster_bot.members.models import (
 from church_roster_bot.ministries.models import Church, Ministry, Role
 from church_roster_bot.scheduling.engine import OCCUPYING
 from church_roster_bot.scheduling.errors import NotAuthorized, NotFound, RosterError
-from church_roster_bot.scheduling.lifecycle import audit
+from church_roster_bot.scheduling.lifecycle import audit, schedule_for
 from church_roster_bot.scheduling.models import Assignment
 from church_roster_bot.services.models import Slot, WorshipService
 from church_roster_bot.whatsapp.payloads import normalize_phone
@@ -241,3 +241,51 @@ def rename_ministry(db: Session, admin: GeneralAdmin, ministry_id: int, name: st
         raise RosterError("invalid ministry name")
     ministry.name = name.strip()
     audit(db, admin.church_id, "admin", admin.id, "rename_ministry", "ministry", ministry.id)
+
+
+def edit_service(
+    db: Session,
+    ministry_id: int,
+    service_id: int,
+    field: str,
+    value: str,
+    actor_type: str,
+    actor_id: int,
+) -> None:
+    service = db.get(WorshipService, service_id, with_for_update=True)
+    if service is None or service.ministry_id != ministry_id:
+        raise NotAuthorized("service is outside the authorized ministry")
+    schedule = schedule_for(db, ministry_id, service.service_date)
+    if schedule and schedule.state in {"published", "closed", "cancelled"}:
+        raise RosterError("published or closed service cannot be moved")
+    occupied = (
+        db.scalar(
+            select(func.count(Assignment.id))
+            .join(Slot, Slot.id == Assignment.slot_id)
+            .where(Slot.service_id == service_id, Assignment.status.in_(OCCUPYING))
+        )
+        or 0
+    )
+    if occupied:
+        raise RosterError("cannot move a service with active assignments")
+    if field == "date":
+        new_day = date.fromisoformat(value)
+        target = schedule_for(db, ministry_id, new_day, create=True)
+        if target.state in {"published", "closed", "cancelled"}:
+            raise RosterError("target month does not accept service changes")
+        service.service_date = new_day
+    elif field == "time":
+        service.start_time = time.fromisoformat(value)
+    else:
+        raise RosterError("unknown service field")
+    ministry = db.get(Ministry, ministry_id)
+    audit(
+        db,
+        ministry.church_id,
+        actor_type,
+        actor_id,
+        "edit_service",
+        "service",
+        service_id,
+        {"field": field},
+    )

@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import ValidationError
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from church_roster_bot.administration.conversation import AdminConversationMixin
@@ -25,6 +26,7 @@ from church_roster_bot.ministries.models import Church, Ministry, Role
 from church_roster_bot.scheduling.engine import RosterEngine
 from church_roster_bot.scheduling.errors import MonthlyLimit, NoCapacity, RosterError
 from church_roster_bot.scheduling.lifecycle import (
+    invitation_text,
     publish_schedule,
     request_replacement,
     schedule_for,
@@ -149,7 +151,7 @@ class Bot(AdminConversationMixin):
             ).all()
             alert = (
                 f"\nConvites pendentes: {', '.join(map(str, pending))}. "
-                "Responda ACEITAR <id> ou RECUSAR <id>."
+                "Envie CONVITES para datas, funções e justificativas."
                 if pending
                 else ""
             )
@@ -262,6 +264,20 @@ class Bot(AdminConversationMixin):
             ).all()
             self._text(db, phone, "Funções autorizadas: " + (", ".join(roles) or "nenhuma"))
             return
+        if upper == "CONVITES" and volunteer:
+            invitations = db.scalars(
+                select(ThirdDayRequest).where(
+                    ThirdDayRequest.volunteer_id == volunteer.id,
+                    ThirdDayRequest.status == "pending",
+                )
+            ).all()
+            self._text(
+                db,
+                phone,
+                "\n\n".join(invitation_text(db, invitation) for invitation in invitations)
+                or "Nenhum convite pendente.",
+            )
+            return
         if upper == "ADMIN" and admin:
             self._state(session, "general_menu")
             self._text(
@@ -283,23 +299,37 @@ class Bot(AdminConversationMixin):
                 self._state(session, "menu", ministry_id=ministry_id)
                 self._menu(db, session, admin, coordinator, volunteer)
             elif session.state.startswith("general_"):
-                self._general(db, session, text, admin)
+                with db.begin_nested():
+                    self._general(db, session, text, admin)
             elif admin or coordinator:
                 ministry_id = session.data.get("ministry_id")
                 ministry = require_ministry(db, ministry_id, admin, coordinator)
                 actor_type, actor_id = (
                     ("admin", admin.id) if admin else ("coordinator", coordinator.id)
                 )
-                self._coordinator(db, session, text, ministry, actor_type, actor_id, coordinator)
+                with db.begin_nested():
+                    self._coordinator(
+                        db, session, text, ministry, actor_type, actor_id, coordinator
+                    )
             elif volunteer:
-                self._volunteer(db, session, text, volunteer)
+                with db.begin_nested():
+                    self._volunteer(db, session, text, volunteer)
             else:
                 self._menu(db, session, admin, coordinator, volunteer)
-        except (RosterError, ValueError, ValidationError, KeyError, IndexError) as exc:
+        except (
+            RosterError,
+            ValueError,
+            ValidationError,
+            KeyError,
+            IndexError,
+            IntegrityError,
+        ) as exc:
             if isinstance(exc, NoCapacity):
                 detail = "vaga lotada"
             elif isinstance(exc, MonthlyLimit):
                 detail = "limite mensal atingido"
+            elif isinstance(exc, IntegrityError):
+                detail = "já existe um cadastro ou configuração com esses dados"
             else:
                 detail = str(exc)
             self._text(

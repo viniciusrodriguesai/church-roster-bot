@@ -13,7 +13,12 @@ from church_roster_bot.members.models import Volunteer
 from church_roster_bot.ministries.models import Ministry, Role
 from church_roster_bot.scheduling.engine import OCCUPYING, RosterEngine
 from church_roster_bot.scheduling.errors import NoCapacity, NotFound, RosterError
-from church_roster_bot.scheduling.models import Assignment, MonthlySchedule, ReplacementRequest
+from church_roster_bot.scheduling.models import (
+    Assignment,
+    MonthlySchedule,
+    ReplacementRequest,
+    ThirdDayRequest,
+)
 from church_roster_bot.services.models import Slot, WorshipService
 
 SCHEDULE_TRANSITIONS = {
@@ -59,6 +64,8 @@ def transition_schedule(schedule: MonthlySchedule, target: str) -> None:
 
 
 def transition_assignment(assignment: Assignment, target: str) -> None:
+    if assignment.status == "pending_confirmation" and target == "confirmed":
+        raise RosterError("confirm reservations through RosterEngine.confirm_reservation")
     if target not in ASSIGNMENT_TRANSITIONS.get(assignment.status, set()):
         raise RosterError(f"invalid assignment transition: {assignment.status} -> {target}")
     assignment.status = target
@@ -117,12 +124,21 @@ def request_replacement(db: Session, volunteer_id: int, assignment_id: int) -> i
 def manual_replace(
     db: Session, roster: RosterEngine, request_id: int, replacement_volunteer_id: int
 ) -> int:
+    with db.begin_nested():
+        return _manual_replace(db, roster, request_id, replacement_volunteer_id)
+
+
+def _manual_replace(
+    db: Session, roster: RosterEngine, request_id: int, replacement_volunteer_id: int
+) -> int:
     request = db.get(ReplacementRequest, request_id, with_for_update=True)
     if request is None or request.status != "pending":
         raise NotFound("pending replacement not found")
     original = db.get(Assignment, request.assignment_id, with_for_update=True)
     if original.status != "replacement_requested":
         raise RosterError("original assignment is not awaiting replacement")
+    if original.volunteer_id == replacement_volunteer_id:
+        raise RosterError("replacement must be a different volunteer")
     old_slot = db.get(Slot, original.slot_id)
     old_service = db.get(WorshipService, old_slot.service_id)
     schedule = schedule_for(db, old_service.ministry_id, old_service.service_date)
@@ -131,7 +147,8 @@ def manual_replace(
     db.get(Volunteer, replacement_volunteer_id, with_for_update=True)
     db.get(Slot, original.slot_id, with_for_update=True)
     transition_assignment(original, "replaced")
-    replacement_id = roster.assign(replacement_volunteer_id, original.slot_id, db=db)
+    member, slot = roster._lock_member_slot(db, replacement_volunteer_id, original.slot_id)
+    replacement_id = roster._assign_locked(db, member, slot, allow_published=True)
     request.status = "fulfilled"
     request.replacement_assignment_id = replacement_id
     if schedule and schedule.state == "published":
@@ -177,6 +194,18 @@ def format_schedule(db: Session, ministry_id: int, day: date) -> str:
     if not services:
         lines.append("Nenhum culto cadastrado.")
     return "\n".join(lines)
+
+
+def invitation_text(db: Session, invitation: ThirdDayRequest) -> str:
+    slot = db.get(Slot, invitation.slot_id)
+    service = db.get(WorshipService, slot.service_id)
+    role = db.get(Role, slot.role_id)
+    return (
+        f"Convite excepcional #{invitation.id}: {service.service_date:%d/%m/%Y} "
+        f"às {service.start_time:%H:%M} — {role.name}.\n"
+        f"Justificativa: {invitation.justification}\n"
+        f"Envie ACEITAR {invitation.id} ou RECUSAR {invitation.id}."
+    )
 
 
 def publish_schedule(db: Session, ministry_id: int, day: date) -> ScheduleVersion:

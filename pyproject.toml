@@ -12,14 +12,16 @@ license = "MIT"
 dependencies = [
   "alembic>=1.14,<2",
   "fastapi>=0.115,<1",
+  "httpx>=0.28,<1",
   "psycopg[binary]>=3.2,<4",
   "pydantic-settings>=2.7,<3",
   "sqlalchemy>=2.0.36,<3",
+  "tzdata>=2024.2",
   "uvicorn>=0.34,<1",
 ]
 
 [project.optional-dependencies]
-dev = ["httpx>=0.28,<1", "pytest>=8.3,<10", "ruff>=0.9,<1"]
+dev = ["pytest>=8.3,<10", "ruff>=0.9,<1"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
