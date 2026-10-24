@@ -1,4 +1,5 @@
 from collections.abc import Callable, Mapping
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
 from itertools import combinations
@@ -7,7 +8,12 @@ from sqlalchemy import and_, distinct, func, or_, select
 from sqlalchemy.orm import Session
 
 from church_roster_bot.availability.models import Unavailability
-from church_roster_bot.members.models import Coordinator, Volunteer, VolunteerRole
+from church_roster_bot.members.models import (
+    Coordinator,
+    CoordinatorMinistry,
+    Volunteer,
+    VolunteerRole,
+)
 from church_roster_bot.members.schemas import VolunteerCreate
 from church_roster_bot.ministries.models import Ministry, Role, RoleConflict
 from church_roster_bot.scheduling.errors import (
@@ -24,6 +30,8 @@ from church_roster_bot.scheduling.models import Assignment, ThirdDayRequest
 from church_roster_bot.services.models import Slot, WorshipService
 
 SessionFactory = Callable[[], Session]
+OCCUPYING = ("pending_confirmation", "confirmed", "replacement_requested", "completed")
+COUNTED_DAYS = OCCUPYING
 
 
 @dataclass(frozen=True)
@@ -46,8 +54,10 @@ class RosterEngine:
     def __init__(self, session_factory: SessionFactory):
         self.session_factory = session_factory
 
-    def register_volunteer(self, church_id: int, data: VolunteerCreate) -> int:
-        with self.session_factory.begin() as db:
+    def register_volunteer(
+        self, church_id: int, data: VolunteerCreate, *, db: Session | None = None
+    ) -> int:
+        with self.session_factory.begin() if db is None else nullcontext(db) as db:
             if not self._roles_belong_to_church(db, church_id, data.role_ids):
                 raise RoleMismatch("every role must belong to this church")
             member = Volunteer(
@@ -61,10 +71,12 @@ class RosterEngine:
             db.add_all(VolunteerRole(volunteer_id=member.id, role_id=rid) for rid in data.role_ids)
             return member.id
 
-    def set_unavailability(self, volunteer_id: int, start: date, end: date) -> list[int]:
+    def set_unavailability(
+        self, volunteer_id: int, start: date, end: date, *, db: Session | None = None
+    ) -> list[int]:
         if start > end:
             raise RosterError("start date must precede end date")
-        with self.session_factory.begin() as db:
+        with self.session_factory.begin() if db is None else nullcontext(db) as db:
             member = db.get(Volunteer, volunteer_id, with_for_update=True)
             if member is None:
                 raise NotFound("volunteer not found")
@@ -75,7 +87,7 @@ class RosterEngine:
                 .join(WorshipService, WorshipService.id == Slot.service_id)
                 .where(
                     Assignment.volunteer_id == volunteer_id,
-                    Assignment.status == "confirmed",
+                    Assignment.status.in_(COUNTED_DAYS),
                     WorshipService.service_date.between(start, end),
                 )
             ).all()
@@ -87,10 +99,12 @@ class RosterEngine:
         service_date: date,
         start_time: time,
         capacities: Mapping[int, int],
+        *,
+        db: Session | None = None,
     ) -> int:
         if not capacities or any(capacity <= 0 for capacity in capacities.values()):
             raise RosterError("each configured role requires positive capacity")
-        with self.session_factory.begin() as db:
+        with self.session_factory.begin() if db is None else nullcontext(db) as db:
             ministry = db.get(Ministry, ministry_id)
             if ministry is None:
                 raise NotFound("ministry not found")
@@ -116,17 +130,23 @@ class RosterEngine:
             )
             return service.id
 
-    def assign(self, volunteer_id: int, slot_id: int) -> int:
-        with self.session_factory.begin() as db:
+    def assign(self, volunteer_id: int, slot_id: int, *, db: Session | None = None) -> int:
+        with self.session_factory.begin() if db is None else nullcontext(db) as db:
             member, slot = self._lock_member_slot(db, volunteer_id, slot_id)
             return self._assign_locked(db, member, slot)
 
     def request_third_day(
-        self, coordinator_id: int, volunteer_id: int, slot_id: int, justification: str
+        self,
+        coordinator_id: int,
+        volunteer_id: int,
+        slot_id: int,
+        justification: str,
+        *,
+        db: Session | None = None,
     ) -> int:
         if not justification.strip():
             raise RosterError("a third-day request requires a justification")
-        with self.session_factory.begin() as db:
+        with self.session_factory.begin() if db is None else nullcontext(db) as db:
             member, slot = self._lock_member_slot(db, volunteer_id, slot_id)
             coordinator = db.get(Coordinator, coordinator_id)
             if (
@@ -136,6 +156,16 @@ class RosterEngine:
             ):
                 raise NotAuthorized("coordinator is not authorized for this church")
             service = db.get(WorshipService, slot.service_id)
+            if (
+                db.scalar(
+                    select(CoordinatorMinistry.id).where(
+                        CoordinatorMinistry.coordinator_id == coordinator_id,
+                        CoordinatorMinistry.ministry_id == service.ministry_id,
+                    )
+                )
+                is None
+            ):
+                raise NotAuthorized("coordinator does not manage this ministry")
             self._check_eligibility(db, member, slot, service)
             if self._monthly_days(db, volunteer_id, service.service_date) != 2:
                 raise RosterError("third-day invitation requires exactly two existing days")
@@ -149,8 +179,10 @@ class RosterEngine:
             db.flush()
             return request.id
 
-    def respond_third_day(self, volunteer_id: int, request_id: int, accept: bool) -> int | None:
-        with self.session_factory.begin() as db:
+    def respond_third_day(
+        self, volunteer_id: int, request_id: int, accept: bool, *, db: Session | None = None
+    ) -> int | None:
+        with self.session_factory.begin() if db is None else nullcontext(db) as db:
             original = db.get(ThirdDayRequest, request_id)
             if original is None or original.volunteer_id != volunteer_id:
                 raise NotAuthorized("invitation not found for this volunteer")
@@ -176,8 +208,8 @@ class RosterEngine:
             request.status = "accepted"
             return assignment_id
 
-    def monthly_days(self, volunteer_id: int, day: date) -> int:
-        with self.session_factory() as db:
+    def monthly_days(self, volunteer_id: int, day: date, *, db: Session | None = None) -> int:
+        with self.session_factory() if db is None else nullcontext(db) as db:
             return self._monthly_days(db, volunteer_id, day)
 
     def capacity_report(self, ministry_id: int, day: date) -> CapacityReport:
@@ -279,7 +311,7 @@ class RosterEngine:
         occupied = (
             db.scalar(
                 select(func.count(Assignment.id)).where(
-                    Assignment.slot_id == slot.id, Assignment.status == "confirmed"
+                    Assignment.slot_id == slot.id, Assignment.status.in_(OCCUPYING)
                 )
             )
             or 0
@@ -294,7 +326,7 @@ class RosterEngine:
                 .join(WorshipService, WorshipService.id == Slot.service_id)
                 .where(
                     Assignment.volunteer_id == member.id,
-                    Assignment.status == "confirmed",
+                    Assignment.status.in_(COUNTED_DAYS),
                     WorshipService.service_date == service.service_date,
                 )
                 .limit(1)
@@ -339,7 +371,7 @@ class RosterEngine:
             .where(
                 Slot.service_id == service.id,
                 Assignment.volunteer_id == member.id,
-                Assignment.status == "confirmed",
+                Assignment.status.in_(COUNTED_DAYS),
             )
         ).all()
         role_ids = [role_id for _, role_id in existing]
@@ -375,7 +407,7 @@ class RosterEngine:
                 .join(Assignment, Assignment.slot_id == Slot.id)
                 .where(
                     Assignment.volunteer_id == volunteer_id,
-                    Assignment.status == "confirmed",
+                    Assignment.status.in_(COUNTED_DAYS),
                     WorshipService.service_date >= start,
                     WorshipService.service_date < end,
                 )

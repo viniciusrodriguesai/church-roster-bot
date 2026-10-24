@@ -34,3 +34,22 @@ class Coordinator(Base):
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     phone_e164: Mapped[str] = mapped_column(String(16), nullable=False)
     active: Mapped[bool] = mapped_column(nullable=False, default=True)
+
+
+class CoordinatorMinistry(Base):
+    __tablename__ = "coordinator_ministries"
+    __table_args__ = (UniqueConstraint("coordinator_id", "ministry_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    coordinator_id: Mapped[int] = mapped_column(ForeignKey("coordinators.id"), nullable=False)
+    ministry_id: Mapped[int] = mapped_column(ForeignKey("ministries.id"), nullable=False)
+
+
+class GeneralAdmin(Base):
+    __tablename__ = "general_admins"
+    __table_args__ = (UniqueConstraint("church_id", "phone_e164"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    church_id: Mapped[int] = mapped_column(ForeignKey("churches.id"), nullable=False)
+    phone_e164: Mapped[str] = mapped_column(String(16), nullable=False)
+    active: Mapped[bool] = mapped_column(nullable=False, default=True)

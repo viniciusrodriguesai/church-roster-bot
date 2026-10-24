@@ -7,7 +7,7 @@ from sqlalchemy.pool import StaticPool
 
 from church_roster_bot.core import models  # noqa: F401 - registers ORM tables
 from church_roster_bot.core.database import Base
-from church_roster_bot.members.models import Coordinator
+from church_roster_bot.members.models import Coordinator, CoordinatorMinistry
 from church_roster_bot.ministries.models import Church, Ministry, Role, RoleConflict
 from church_roster_bot.scheduling.engine import RosterEngine
 from church_roster_bot.services.models import Slot
@@ -43,6 +43,7 @@ def roster():
         )
         db.add(coordinator)
         db.flush()
+        db.add(CoordinatorMinistry(coordinator_id=coordinator.id, ministry_id=ministry.id))
         ids = {
             "church": church.id,
             "ministry": ministry.id,
