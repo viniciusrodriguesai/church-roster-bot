@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from church_roster_bot.administration.proposals import format_proposal
+from church_roster_bot.administration.reports import format_audit, format_monthly_report
 from church_roster_bot.administration.service import (
     add_coordinator,
     add_ministry,
@@ -49,6 +50,7 @@ from church_roster_bot.scheduling.proposals import (
     require_proposal,
 )
 from church_roster_bot.scheduling.reminders import configure_reminders
+from church_roster_bot.scheduling.reports import audit_history, monthly_report
 from church_roster_bot.services.models import Slot, WorshipService
 from church_roster_bot.whatsapp.models import OutboundMessage
 from church_roster_bot.whatsapp.payloads import buttons_payload, normalize_phone, text_payload
@@ -105,6 +107,23 @@ class AdminConversationMixin:
                 self._text(
                     db, phone, format_schedule(db, ministry.id, parse_month(text.split(" ", 1)[1]))
                 )
+            elif upper.startswith("RELATORIO "):
+                report = monthly_report(
+                    db, ministry.id, parse_month(text.split(" ", 1)[1]), actor_type, actor_id
+                )
+                self._text(db, phone, format_monthly_report(report))
+            elif upper == "AUDITORIA" or upper.startswith("AUDITORIA "):
+                parts = text.split()
+                if len(parts) > 2:
+                    raise RosterError("use AUDITORIA ou AUDITORIA <id anterior>")
+                page = audit_history(
+                    db,
+                    ministry.id,
+                    actor_type,
+                    actor_id,
+                    before_id=int(parts[1]) if len(parts) == 2 else None,
+                )
+                self._text(db, phone, format_audit(page))
             elif upper.startswith("PROPOR "):
                 proposal = DistributionPlanner(self.roster).propose(
                     db,
@@ -393,6 +412,7 @@ class AdminConversationMixin:
                     "add_volunteer",
                     "volunteer",
                     volunteer_id,
+                    ministry_id=ministry.id,
                 )
                 self._text(
                     db,

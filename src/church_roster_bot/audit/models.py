@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from church_roster_bot.core.database import Base
@@ -8,9 +8,11 @@ from church_roster_bot.core.database import Base
 
 class AuditEvent(Base):
     __tablename__ = "audit_events"
+    __table_args__ = (Index("ix_audit_scope_id", "church_id", "ministry_id", "id"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     church_id: Mapped[int] = mapped_column(ForeignKey("churches.id"), nullable=False)
+    ministry_id: Mapped[int | None] = mapped_column(ForeignKey("ministries.id"))
     actor_type: Mapped[str] = mapped_column(String(16), nullable=False)
     actor_id: Mapped[int] = mapped_column(nullable=False)
     action: Mapped[str] = mapped_column(String(64), nullable=False)

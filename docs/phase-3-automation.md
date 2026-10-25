@@ -1,7 +1,8 @@
 # Fase 3: arquitetura e entrega incremental
 
-Status: distribuição, abertura mensal e lista de espera implementadas; incrementos na branch
-`feature/phase-3-automation`. A Fase 2 permanece compatível. Este documento
+Status: as nove etapas do roteiro estão implementadas na branch
+`feature/phase-3-automation`, incluindo relatórios e auditoria. A Fase 2 permanece
+compatível. Este documento
 distingue decisões de arquitetura de funcionalidades já entregues.
 
 ## Incrementos entregues
@@ -313,3 +314,34 @@ As fases mantêm transações separadas e a ordem voluntário/vaga/convite. Test
 com PostgreSQL e SQLite verificam dois dispatchers, fila concorrente, aceite
 repetido e disputa com inscrição direta. O downgrade remove somente a política;
 os convites e sua trilha de auditoria são conservados.
+
+## Relatórios e auditoria autorizada
+
+`RELATORIO AAAA-MM` calcula frequência, funções confirmadas, presenças concluídas,
+ausências, reservas e pedidos de troca por voluntário. Participações substituídas,
+canceladas e recusadas não contam como compromissos. Uma confirmação não comprova
+presença: somente o status explícito `completed` é contado como presença registrada.
+Os períodos usam as datas civis dos cultos, sem converter o mês por UTC.
+
+O equilíbrio mostra média de dias, diferença máxima e desvio padrão entre todos
+os voluntários ativos com permissão no ministério, inclusive carga zero. Pessoas
+inativas com histórico permanecem listadas, mas não entram nessa população atual.
+Vagas descontam todos os estados que ocupam capacidade; reservas aguardando
+confirmação são exibidas separadamente. Substituições são agregadas por estado
+do pedido e mês do culto original; recusas de convites normais e excepcionais
+são separadas de reservas recusadas. A consulta não cria eventos ou inscrições.
+
+`231e4c9a7308` acrescenta vínculo opcional de ministério e índice à auditoria.
+O vínculo é capturado na transação da mudança. A migração associa entidades com
+trajeto conhecido e igreja correspondente; registros antigos ambíguos são
+preservados sem inferência. Eventos de voluntário novos recebem o ministério
+explícito do comando autorizado. O downgrade conserva os eventos e seus detalhes,
+removendo somente o vínculo e índice novos. Upgrade/downgrade e comparação de
+metadados são testados nos dois bancos com histórico legado sintético.
+
+`AUDITORIA [id anterior]` usa paginação estável por ID, com vinte eventos na
+conversa e limite de cem no serviço. Cada consulta revalida o ator. Coordenadores
+veem somente eventos do ministério autorizado; administradores gerais têm acesso
+ao histórico da própria igreja, incluindo registros legados sem escopo. Nenhum
+registro de outra igreja é retornado. O histórico expõe somente eventos que
+foram efetivamente registrados; não reconstrói ações legadas sem auditoria.

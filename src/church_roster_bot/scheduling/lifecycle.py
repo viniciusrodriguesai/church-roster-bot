@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from church_roster_bot.audit.models import AuditEvent, ScheduleVersion
+from church_roster_bot.audit.scope import entity_ministry
 from church_roster_bot.core.time import utc_now
 from church_roster_bot.members.models import Volunteer
 from church_roster_bot.ministries.models import Ministry, Role
@@ -302,10 +303,24 @@ def audit(
     entity_type: str,
     entity_id: int,
     details: dict | None = None,
+    *,
+    ministry_id: int | None = None,
 ) -> None:
+    derived = entity_ministry(db, entity_type, entity_id)
+    if ministry_id is None:
+        ministry_id = derived
+    if ministry_id is not None:
+        ministry = db.get(Ministry, ministry_id)
+        if (
+            ministry is None
+            or ministry.church_id != church_id
+            or (derived is not None and derived != ministry_id)
+        ):
+            raise RosterError("audit ministry does not match its church and entity")
     db.add(
         AuditEvent(
             church_id=church_id,
+            ministry_id=ministry_id,
             actor_type=actor_type,
             actor_id=actor_id,
             action=action,

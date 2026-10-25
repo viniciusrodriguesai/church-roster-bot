@@ -153,6 +153,7 @@ def edit_volunteer(
         "volunteer",
         member.id,
         {"field": field},
+        ministry_id=ministry.id,
     )
 
 

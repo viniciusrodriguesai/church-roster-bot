@@ -84,6 +84,21 @@ recebe no máximo um lembrete; pedidos de substituição não são lembrados com
 presença confirmada. Fora da janela de conversa, é necessário o template aprovado
 `WHATSAPP_REMINDER_TEMPLATE`; sem consentimento ou template, a entrega fica bloqueada.
 
+## Relatórios e auditoria
+
+No menu da coordenação, `RELATORIO AAAA-MM` mostra frequência por voluntário,
+compromissos confirmados, presenças registradas, ausências, reservas, pedidos de
+troca, equilíbrio incluindo carga zero, vagas sem preenchimento, substituições
+e recusas. O mês é o da data civil do culto. Reservas continuam ocupando vagas,
+mas aparecem separadas de confirmações e presença.
+
+`AUDITORIA` mostra os vinte eventos mais recentes; `AUDITORIA <id>` busca os
+anteriores ao ID informado. A resposta indica o próximo cursor quando necessário.
+O coordenador vê somente o ministério selecionado; o administrador geral pode
+consultar o histórico da igreja, inclusive registros legados sem vínculo seguro
+com um ministério. A autorização é revalidada em cada consulta. Os comandos são
+de leitura e não alteram inscrições, convites ou registros de auditoria.
+
 ## Administrador geral
 
 Para editar data ou horário de um culto, entre em Configurar cultos e envie `EDITAR <culto_id>`, seguido por `DATA AAAA-MM-DD` ou `HORA HH:MM`. A confirmação só é aplicada se o culto não tiver participações ativas nem estiver publicado ou encerrado; isso evita mover compromissos já assumidos.

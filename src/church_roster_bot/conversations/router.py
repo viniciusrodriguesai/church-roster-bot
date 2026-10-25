@@ -116,7 +116,8 @@ class Bot(AdminConversationMixin):
                 db,
                 phone,
                 f"ADMINISTRAÇÃO — {db.get(Ministry, session.data['ministry_id']).name.upper()}"
-                "\nEscolha uma opção:\nPrévia de distribuição: PROPOR AAAA-MM.",
+                "\nEscolha uma opção:\nPrévia de distribuição: PROPOR AAAA-MM."
+                "\nRelatórios: RELATORIO AAAA-MM. Histórico: AUDITORIA.",
                 [
                     ("1", "Gerenciar diáconos"),
                     ("2", "Configurar cultos"),
