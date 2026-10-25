@@ -1,3 +1,4 @@
+import os
 from datetime import time
 
 import pytest
@@ -7,19 +8,30 @@ from sqlalchemy.pool import StaticPool
 
 from church_roster_bot.core import models  # noqa: F401 - registers ORM tables
 from church_roster_bot.core.database import Base
-from church_roster_bot.members.models import Coordinator
+from church_roster_bot.members.models import Coordinator, CoordinatorMinistry
 from church_roster_bot.ministries.models import Church, Ministry, Role, RoleConflict
 from church_roster_bot.scheduling.engine import RosterEngine
 from church_roster_bot.services.models import Slot
 
 
 @pytest.fixture
-def roster():
-    engine = create_engine(
-        "sqlite+pysqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
+def roster(request, tmp_path):
+    postgres = getattr(request, "param", "sqlite") == "postgres"
+    if postgres:
+        url = os.getenv("TEST_DATABASE_URL")
+        if not url:
+            pytest.skip("set TEST_DATABASE_URL to a disposable PostgreSQL database")
+        if not url.startswith("postgresql"):
+            pytest.fail("TEST_DATABASE_URL must point to PostgreSQL")
+        engine = create_engine(url)
+    elif getattr(request, "param", "sqlite") == "sqlite_file":
+        engine = create_engine(f"sqlite+pysqlite:///{tmp_path / 'terminal.sqlite3'}")
+    else:
+        engine = create_engine(
+            "sqlite+pysqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
     Base.metadata.create_all(engine)
     factory = sessionmaker(engine, expire_on_commit=False)
     with factory.begin() as db:
@@ -43,6 +55,7 @@ def roster():
         )
         db.add(coordinator)
         db.flush()
+        db.add(CoordinatorMinistry(coordinator_id=coordinator.id, ministry_id=ministry.id))
         ids = {
             "church": church.id,
             "ministry": ministry.id,
@@ -53,6 +66,8 @@ def roster():
             "joint": roles[3].id,
         }
     yield RosterEngine(factory), factory, ids
+    if postgres:
+        Base.metadata.drop_all(engine)
     engine.dispose()
 
 

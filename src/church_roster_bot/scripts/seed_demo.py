@@ -4,7 +4,13 @@ from sqlalchemy import select
 
 from church_roster_bot.core import models  # noqa: F401
 from church_roster_bot.core.database import SessionLocal
-from church_roster_bot.members.models import Coordinator, Volunteer, VolunteerRole
+from church_roster_bot.members.models import (
+    Coordinator,
+    CoordinatorMinistry,
+    GeneralAdmin,
+    Volunteer,
+    VolunteerRole,
+)
 from church_roster_bot.ministries.models import Church, Ministry, Role, RoleConflict
 
 
@@ -26,13 +32,15 @@ def main() -> None:
         for role in (roles[0], roles[1], roles[3]):
             a, b = sorted((role.id, roles[2].id))
             db.add(RoleConflict(role_a_id=a, role_b_id=b))
-        db.add(
-            Coordinator(
-                church_id=church.id,
-                name="Coordenador Exemplo",
-                phone_e164="+15550100000",
-            )
+        coordinator = Coordinator(
+            church_id=church.id,
+            name="Coordenador Exemplo",
+            phone_e164="+15550100000",
         )
+        db.add(coordinator)
+        db.flush()
+        db.add(CoordinatorMinistry(coordinator_id=coordinator.id, ministry_id=ministry.id))
+        db.add(GeneralAdmin(church_id=church.id, phone_e164="+15550109999"))
         demo_permissions = [[0, 1], [0, 1, 2], [2], [2], [3], [0, 1], [2], [0, 1, 2]]
         for index, permission_indices in enumerate(demo_permissions, start=1):
             member = Volunteer(

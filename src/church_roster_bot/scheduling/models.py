@@ -9,21 +9,31 @@ from church_roster_bot.core.database import Base
 class Assignment(Base):
     __tablename__ = "assignments"
     __table_args__ = (
-        CheckConstraint("status IN ('confirmed', 'cancelled')", name="valid_assignment_status"),
+        CheckConstraint(
+            "status IN ('pending_confirmation', 'confirmed', 'replacement_requested', "
+            "'replaced', 'cancelled', 'completed', 'absent', 'declined')",
+            name="valid_assignment_status",
+        ),
         Index(
             "uq_confirmed_assignment_per_slot_volunteer",
             "slot_id",
             "volunteer_id",
             unique=True,
-            postgresql_where=text("status = 'confirmed'"),
-            sqlite_where=text("status = 'confirmed'"),
+            postgresql_where=text(
+                "status IN ('pending_confirmation', 'confirmed', "
+                "'replacement_requested', 'completed')"
+            ),
+            sqlite_where=text(
+                "status IN ('pending_confirmation', 'confirmed', "
+                "'replacement_requested', 'completed')"
+            ),
         ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     slot_id: Mapped[int] = mapped_column(ForeignKey("slots.id"), nullable=False)
     volunteer_id: Mapped[int] = mapped_column(ForeignKey("volunteers.id"), nullable=False)
-    status: Mapped[str] = mapped_column(String(16), nullable=False, default="confirmed")
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="confirmed")
     exception_id: Mapped[int | None] = mapped_column(
         ForeignKey("third_day_requests.id"), nullable=True
     )
@@ -51,3 +61,39 @@ class ThirdDayRequest(Base):
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
     responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class MonthlySchedule(Base):
+    __tablename__ = "monthly_schedules"
+    __table_args__ = (
+        CheckConstraint("month BETWEEN 1 AND 12", name="valid_schedule_month"),
+        CheckConstraint(
+            "state IN ('draft', 'open', 'under_review', 'published', 'closed', 'cancelled')",
+            name="valid_schedule_state",
+        ),
+        Index("uq_ministry_year_month", "ministry_id", "year", "month", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ministry_id: Mapped[int] = mapped_column(ForeignKey("ministries.id"), nullable=False)
+    year: Mapped[int] = mapped_column(nullable=False)
+    month: Mapped[int] = mapped_column(nullable=False)
+    state: Mapped[str] = mapped_column(String(24), nullable=False, default="draft")
+    version: Mapped[int] = mapped_column(nullable=False, default=0)
+
+
+class ReplacementRequest(Base):
+    __tablename__ = "replacement_requests"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'fulfilled', 'cancelled')", name="valid_replacement_status"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    assignment_id: Mapped[int] = mapped_column(ForeignKey("assignments.id"), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    replacement_assignment_id: Mapped[int | None] = mapped_column(ForeignKey("assignments.id"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
