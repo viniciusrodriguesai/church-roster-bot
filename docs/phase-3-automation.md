@@ -1,6 +1,6 @@
 # Fase 3: arquitetura e entrega incremental
 
-Status: arquitetura e validação consultiva do motor entregues; implementação em incrementos na branch
+Status: arquitetura, validação consultiva e prévia de distribuição entregues; incrementos na branch
 `feature/phase-3-automation`. A Fase 2 permanece compatível. Este documento
 distingue decisões de arquitetura de funcionalidades já entregues.
 
@@ -13,6 +13,16 @@ distingue decisões de arquitetura de funcionalidades já entregues.
   capacidade, dias mensais e compatibilidade de funções para o cálculo. A
   inscrição real continua bloqueando e revalidando os dados atuais. Não há
   migração nem mudança no fluxo de exceção existente neste incremento.
+- `DistributionPlanner.propose`: calcula sugestões determinísticas somente para
+  ministérios autorizados e meses abertos. A política `balanced-v1` considera
+  carga mensal global, histórico recente, escassez de candidatos, disponibilidade
+  e sugestões anteriores. As pontuações e rejeições agregadas ficam no resultado;
+  nenhuma participação, convite ou exceção é gravada. O relógio é injetável,
+  instantes de geração são UTC e cultos já iniciados no fuso da igreja são excluídos.
+- No menu do coordenador ou administrador, `PROPOR AAAA-MM` apresenta a prévia
+  e as explicações. Repetir o comando recalcula o estado atual; não reserva vagas
+  nem habilita aprovação neste incremento. Aprovação persistente e aceite por
+  convite continuam pendentes. Consultas de prévia não exigem migração.
 
 ## Decisão: proposta, aprovação e confirmação são operações distintas
 
@@ -57,6 +67,7 @@ Heurística determinística, sem dependência de serviços externos ou modelos d
 - Registrar os valores que motivaram cada escolha e a versão da política.
 
 A janela histórica inicial será de 90 dias anteriores ao mês planejado.
+Cultos futuros nessa janela não são contados como histórico prestado.
 Participações canceladas, recusadas, substituídas e ausências não contam como
 serviço prestado. Reservas e pedidos de substituição ainda ocupam capacidade no
 mês alvo. O limite mensal é global para o voluntário, como na Fase 2.
@@ -121,3 +132,21 @@ concorrência aplicáveis. CI verde para o SHA publicado é condição para segu
 Não criar PR, não fazer merge, não reescrever histórico e não publicar artefatos
 temporários ou bancos. Nenhuma conexão à Meta ou infraestrutura paga faz parte
 do desenvolvimento.
+
+## Validação da distribuição
+
+`tests/test_assignment_preview.py` cobre a equivalência entre consulta e
+inscrição e os efeitos das sugestões em memória. `tests/test_distribution.py`
+cobre equilíbrio, desempate pelo histórico, janela histórica, exclusão de
+cancelamentos e ausências, escassez de funções, limite global entre ministérios,
+capacidade, conflitos, autorização atual, fusos e roteamento real dos comandos.
+Ambos rodam em SQLite e PostgreSQL quando `TEST_DATABASE_URL` está definido.
+Um listener SQL verifica que o planejamento em si executa somente `SELECT`.
+As mensagens de resposta à consulta são gravadas pela conversa na outbox normal,
+sem criar inscrições nem convites proativos.
+
+O planejador consulta a matriz de elegibilidade atual uma vez e atualiza carga
+e compatibilidade projetadas em memória. Cada sugestão selecionada passa de novo
+pelo motor compartilhado com todas as projeções anteriores. Um teste limita o
+número de consultas em um mês sintético para evitar a regressão de recomputar
+toda a matriz SQL após cada escolha.

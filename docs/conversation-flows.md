@@ -10,6 +10,16 @@ Todos os passos são gravados em `conversation_sessions`. `MENU` volta ao menu e
 
 `MENU` apresenta nove opções. Gerenciar diáconos: `NOVO` pede nome, E.164, IDs das funções e confirmação; `LISTAR` consulta; `EDITAR <id>` recebe `NOME`, `TELEFONE`, `FUNCOES`, `ATIVAR` ou `DESATIVAR` e pede confirmação. Configurar cultos pede data, horário e pares `função_id:vagas`. Configurar vagas pede ID da vaga e nova capacidade; não pode ficar abaixo das inscrições ativas. Inscrições usam `ABRIR AAAA-MM`, `REVISAR AAAA-MM` ou `FECHAR AAAA-MM`. Há consultas de escala, vagas e participantes. Exceção usa `EXCECAO <voluntário_id> <vaga_id>` e justificativa. Substituição manual usa `SUBSTITUIR <pedido_id> <voluntário_id>` e revalida o motor. Publicar gera versão e texto para encaminhar. `ESCALA NOVEMBRO 2026` ou `ESCALA 2026-11` consultam sem publicar.
 
+## Prévia de distribuição (Fase 3)
+
+No menu do coordenador ou administrador com ministério selecionado, envie
+`PROPOR AAAA-MM`. O mês precisa ter inscrições abertas. A resposta mostra a
+política de distribuição, as sugestões por vaga, a carga e o histórico usados
+em cada escolha e as posições sem candidato elegível. Somente cultos futuros
+no fuso da igreja entram no cálculo. Repetir o comando calcula uma nova prévia
+com o estado atual; não cria reservas, inscrições ou convites. Aprovação
+persistente e convites de distribuição ainda estão pendentes.
+
 ## Administrador geral
 
 Para editar data ou horário de um culto, entre em Configurar cultos e envie `EDITAR <culto_id>`, seguido por `DATA AAAA-MM-DD` ou `HORA HH:MM`. A confirmação só é aplicada se o culto não tiver participações ativas nem estiver publicado ou encerrado; isso evita mover compromissos já assumidos.

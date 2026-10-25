@@ -7,6 +7,7 @@ from datetime import date, time
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from church_roster_bot.administration.proposals import format_proposal
 from church_roster_bot.administration.service import (
     add_coordinator,
     add_ministry,
@@ -24,6 +25,7 @@ from church_roster_bot.members.models import Coordinator, Volunteer, VolunteerRo
 from church_roster_bot.members.schemas import VolunteerCreate
 from church_roster_bot.ministries.models import Role
 from church_roster_bot.notifications.invitations import DELIVERY_LABELS, enqueue_invitation
+from church_roster_bot.scheduling.distribution import DistributionPlanner
 from church_roster_bot.scheduling.engine import OCCUPYING
 from church_roster_bot.scheduling.errors import RosterError
 from church_roster_bot.scheduling.lifecycle import (
@@ -93,6 +95,15 @@ class AdminConversationMixin:
                 self._text(
                     db, phone, format_schedule(db, ministry.id, parse_month(text.split(" ", 1)[1]))
                 )
+            elif upper.startswith("PROPOR "):
+                proposal = DistributionPlanner(self.roster).propose(
+                    db,
+                    ministry.id,
+                    parse_month(text.split(" ", 1)[1]),
+                    actor_type=actor_type,
+                    actor_id=actor_id,
+                )
+                self._text(db, phone, format_proposal(db, proposal))
             else:
                 self._menu(db, session, None, coordinator, None)
             return
