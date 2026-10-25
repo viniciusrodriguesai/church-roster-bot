@@ -27,6 +27,7 @@ from church_roster_bot.ministries.models import Role
 from church_roster_bot.notifications.invitations import DELIVERY_LABELS, enqueue_invitation
 from church_roster_bot.scheduling.automation import configure_opening
 from church_roster_bot.scheduling.distribution import DistributionPlanner
+from church_roster_bot.scheduling.emergencies import configure_emergencies
 from church_roster_bot.scheduling.engine import OCCUPYING
 from church_roster_bot.scheduling.errors import RosterError
 from church_roster_bot.scheduling.lifecycle import (
@@ -130,6 +131,31 @@ class AdminConversationMixin:
                     f"Para convidar, envie APROVAR {proposal_id}. "
                     "Nenhuma inscrição ou convite foi criado.",
                 )
+            elif upper.startswith("EMERGENCIAS "):
+                parts = upper.split()
+                if parts == ["EMERGENCIAS", "DESATIVAR"]:
+                    self._state(session, "admin_emergencies_confirm", emergencies_enabled=False)
+                    prompt = "Desativar novas ofertas automáticas de emergência deste ministério?"
+                elif len(parts) == 3:
+                    hours, minutes = int(parts[1]), int(parts[2])
+                    if not 1 <= hours <= 72 or not 1 <= minutes <= 120:
+                        raise RosterError("use EMERGENCIAS <horas 1..72> <minutos 1..120>")
+                    self._state(
+                        session,
+                        "admin_emergencies_confirm",
+                        emergencies_enabled=True,
+                        emergency_hours=hours,
+                        emergency_minutes=minutes,
+                    )
+                    prompt = (
+                        f"Buscar cobertura nas {hours} horas antes do culto, com prazo de "
+                        f"{minutes} minutos por convite? Toda confirmação exige aceite."
+                    )
+                else:
+                    raise RosterError("use EMERGENCIAS <horas> <minutos> ou EMERGENCIAS DESATIVAR")
+                self._send(
+                    db, phone, buttons_payload(prompt, [("SIM", "Confirmar"), ("NAO", "Cancelar")])
+                )
             elif upper.startswith("LEMBRETES "):
                 parts = upper.split()
                 if parts == ["LEMBRETES", "DESATIVAR"]:
@@ -220,7 +246,26 @@ class AdminConversationMixin:
             else:
                 self._menu(db, session, None, coordinator, None)
             return
-        if state == "admin_reminders_confirm":
+        if state == "admin_emergencies_confirm":
+            if upper == "SIM":
+                options = (
+                    {"hours": data["emergency_hours"], "minutes": data["emergency_minutes"]}
+                    if data["emergencies_enabled"]
+                    else {}
+                )
+                configure_emergencies(
+                    db,
+                    ministry.id,
+                    actor_type,
+                    actor_id,
+                    enabled=data["emergencies_enabled"],
+                    **options,
+                )
+                self._text(db, phone, "Emergências automáticas configuradas.")
+            else:
+                self._text(db, phone, "Configuração descartada.")
+            self._state(session, "menu")
+        elif state == "admin_reminders_confirm":
             if upper == "SIM":
                 options = (
                     {

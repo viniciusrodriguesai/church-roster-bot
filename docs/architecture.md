@@ -50,6 +50,13 @@ na outbox. Um vínculo único com a participação impede repetir lembretes apó
 reinício ou mudança de configuração. `notifications.reminders` revalida participação,
 identidade do culto, política e consentimento imediatamente antes do transporte.
 
+`scheduling.emergencies` oferece capacidade próxima ao início do culto sob uma
+política optativa. Reutiliza candidatos, convites e aceite; a fila elegível tem
+precedência. Todos os convites novos de cultos urgentes, inclusive fila e troca,
+usam prazo curto. Pedidos de substituição são atendidos por início UTC do culto.
+Vagas com convites pendentes não recebem ofertas adicionais para a mesma posição;
+a coordenação recebe avisos de cobertura pendente ou ausência de candidatos.
+
 O simulador escreve o mesmo evento de entrada e usa o mesmo worker e roteador. Ele **não chama a Meta**. Os testes rápidos usam SQLite; a CI usa PostgreSQL para migração e concorrência. Em produção, use somente PostgreSQL.
 
 No terminal, uma thread processa e entrega mensagens com transporte local e consulta a caixa recebida enquanto a entrada de texto aguarda no processo principal. Assim, um convite iniciado em outro terminal aparece sem nova entrada. Transações de processamento e reserva de envio usam `BEGIN IMMEDIATE` no SQLite para serializar os terminais locais, enquanto o PostgreSQL mantém os bloqueios de linha existentes.
@@ -85,5 +92,5 @@ O número recebido de um webhook assinado é procurado no cadastro. Voluntários
 - Uma perda de rede após a Meta aceitar um envio tem resultado ambíguo. O worker marca `unknown` e não repete automaticamente para evitar mensagem duplicada. HTTP 429 tem até três tentativas. Monitore e resolva `failed`, `unknown` e `blocked_window`.
 - Rode uma instância do worker nesta fase. Eventos de status que chegarem antes do registro do ID de saída podem exigir reconciliação manual.
 - Um template aprovado e consentimento são necessários para convites fora da janela de 24 horas; sem isso, o convite continua registrado, mas a notificação fica bloqueada.
-- Emergência e relatórios avançados permanecem nos próximos incrementos da Fase 3.
+- Relatórios avançados permanecem no próximo incremento da Fase 3.
 - Configure retenção/eliminação de eventos com dados pessoais, backup PostgreSQL e monitoramento antes do uso real. Não existe rotina automática de limpeza nesta fase.

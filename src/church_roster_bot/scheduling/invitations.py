@@ -13,7 +13,7 @@ from church_roster_bot.notifications.automation import (
     service_start,
 )
 from church_roster_bot.scheduling.errors import RosterError
-from church_roster_bot.scheduling.models import AutomationInvitation
+from church_roster_bot.scheduling.models import AutomationInvitation, EmergencyPolicy
 from church_roster_bot.services.models import Slot, WorshipService
 
 
@@ -44,6 +44,18 @@ def create_invitation(
     start = service_start(db, service)
     if start <= instant:
         raise RosterError("service has already started")
+    lifetime = timedelta(hours=config.automation_invite_ttl_hours)
+    emergency = db.get(EmergencyPolicy, service.ministry_id)
+    if (
+        emergency
+        and emergency.enabled
+        and start - instant <= timedelta(hours=emergency.horizon_hours)
+    ):
+        lifetime = min(lifetime, timedelta(minutes=emergency.response_minutes))
+        reason = (
+            f"Urgente: responda em até {emergency.response_minutes} minuto(s); "
+            f"validade limitada ao início do culto. {reason}"
+        )[:1000]
     offer = AutomationInvitation(
         kind=kind,
         source_key=source_key,
@@ -53,7 +65,7 @@ def create_invitation(
         slot_id=slot_id,
         reason=reason,
         created_at=instant,
-        expires_at=min(start, instant + timedelta(hours=config.automation_invite_ttl_hours)),
+        expires_at=min(start, instant + lifetime),
         service_fingerprint=service_fingerprint(db, slot),
     )
     db.add(offer)

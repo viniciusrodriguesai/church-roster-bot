@@ -1,6 +1,7 @@
 """Invite one eligible substitute at a time; the original remains until accepted."""
 
-from datetime import datetime
+from datetime import UTC, datetime
+from zoneinfo import ZoneInfoNotFoundError
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -35,6 +36,16 @@ def replacement_completed(db: Session, request_id: int, config: Settings) -> Non
         f"às {service.start_time:%H:%M}. Sua participação original foi substituída.",
         config,
     )
+
+
+def _request_order(db: Session, request: ReplacementRequest) -> tuple[datetime, int]:
+    original = db.get(Assignment, request.assignment_id)
+    service = db.get(WorshipService, db.get(Slot, original.slot_id).service_id)
+    try:
+        start = service_start(db, service)
+    except (ValueError, ZoneInfoNotFoundError):
+        start = datetime.max.replace(tzinfo=UTC)
+    return start, request.id
 
 
 def dispatch_replacements(
@@ -128,6 +139,8 @@ def dispatch_replacements(
             offer.status, offer.responded_at = "expired", instant
             notify_offer(db, offer, "expired", config)
     created = 0
+    # Earliest service first, independently of when the absence was reported.
+    requests = sorted(requests, key=lambda r: _request_order(db, r))
     for request in requests:
         if request.status != "pending":
             continue
@@ -137,7 +150,7 @@ def dispatch_replacements(
         ministry = db.get(Ministry, service.ministry_id)
         try:
             started = service_start(db, service) <= instant
-        except ValueError:
+        except (ValueError, ZoneInfoNotFoundError):
             notify_ministry(
                 db,
                 ministry.id,

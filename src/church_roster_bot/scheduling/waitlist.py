@@ -225,7 +225,7 @@ def dispatch_waitlist(
             db.scalar(
                 select(func.count(AutomationInvitation.id)).where(
                     AutomationInvitation.slot_id == slot.id,
-                    AutomationInvitation.kind == "waitlist",
+                    AutomationInvitation.kind != "replacement",
                     AutomationInvitation.status == "pending",
                 )
             )

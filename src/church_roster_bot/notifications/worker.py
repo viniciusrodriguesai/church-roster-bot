@@ -15,6 +15,7 @@ from church_roster_bot.notifications.members import prepare_member_notice
 from church_roster_bot.notifications.outbox import apply_window
 from church_roster_bot.notifications.reminders import notify_reminder_delivery, prepare_reminder
 from church_roster_bot.scheduling.automation import open_monthly_schedules
+from church_roster_bot.scheduling.emergencies import dispatch_emergencies
 from church_roster_bot.scheduling.models import AutomationInvitation, ThirdDayRequest
 from church_roster_bot.scheduling.offers import expire_offers
 from church_roster_bot.scheduling.reminders import enqueue_reminders
@@ -243,8 +244,9 @@ class Worker:
             for operation in (
                 lambda db: expire_offers(db, self.config),
                 lambda db: open_monthly_schedules(db, self.config),
-                lambda db: dispatch_waitlist(db, self.bot.roster, self.config),
                 lambda db: dispatch_replacements(db, self.bot.roster, self.config),
+                lambda db: dispatch_waitlist(db, self.bot.roster, self.config),
+                lambda db: dispatch_emergencies(db, self.bot.roster, self.config),
                 lambda db: enqueue_reminders(db, self.config),
             ):
                 with self.session_factory.begin() as db:

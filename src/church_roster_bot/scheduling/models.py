@@ -201,6 +201,20 @@ class AutomationPolicy(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class EmergencyPolicy(Base):
+    __tablename__ = "emergency_policies"
+    __table_args__ = (
+        CheckConstraint("horizon_hours BETWEEN 1 AND 72", name="valid_emergency_horizon"),
+        CheckConstraint("response_minutes BETWEEN 1 AND 120", name="valid_emergency_response"),
+    )
+
+    ministry_id: Mapped[int] = mapped_column(ForeignKey("ministries.id"), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(nullable=False, default=False)
+    horizon_hours: Mapped[int] = mapped_column(nullable=False, default=6)
+    response_minutes: Mapped[int] = mapped_column(nullable=False, default=15)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class ReminderPolicy(Base):
     __tablename__ = "reminder_policies"
     __table_args__ = (CheckConstraint("days_before BETWEEN 0 AND 30", name="valid_reminder_days"),)

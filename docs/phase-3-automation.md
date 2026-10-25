@@ -291,3 +291,25 @@ liberados por `INICIAR`, sujeitos a nova validação; horários vencidos após i
 do culto são cancelados. Resultados incertos nunca são reenviados automaticamente
 e a coordenação é avisada. Uma correção regressiva do relógio adia o envio até
 o instante UTC registrado, sem consumir tentativa.
+
+## Emergências
+
+`131d2b8a9607` acrescenta uma política optativa por ministério, sem modificar
+escala ou convites existentes. O horizonte é 1..72 horas e o prazo de resposta
+1..120 minutos. Dentro do horizonte, todo convite novo recebe prazo limitado
+pelo início UTC do culto e pela política de emergência. Convites anteriores
+mantêm o prazo original; a coordenação recebe aviso de cobertura pendente.
+
+O worker procura primeiro substitutos, depois atende a fila e só então oferece
+as vagas urgentes restantes. Pedidos de troca são ordenados pelo início real
+UTC, independentemente da ordem em que chegaram. A rotina de emergência respeita
+posições ainda aguardando aceite de qualquer automação normal, dá precedência
+à fila elegível e nunca reinvita alguém já tentado para aquela vaga. Recusa,
+expiração ou perda de elegibilidade permite tentar outra pessoa. Falta de
+candidato gera aviso deduplicado; ninguém é confirmado sem aceite nem recebe
+terceiro dia fora do procedimento excepcional existente.
+
+As fases mantêm transações separadas e a ordem voluntário/vaga/convite. Testes
+com PostgreSQL e SQLite verificam dois dispatchers, fila concorrente, aceite
+repetido e disputa com inscrição direta. O downgrade remove somente a política;
+os convites e sua trilha de auditoria são conservados.

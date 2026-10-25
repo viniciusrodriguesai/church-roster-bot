@@ -61,6 +61,18 @@ cadastrados. O worker também recupera aberturas vencidas do mês atual quando
 ainda existem cultos futuros; escalas encerradas não são reabertas.
 `ABERTURA DESATIVAR` pede confirmação para desabilitar a rotina.
 
+## Emergências
+
+`EMERGENCIAS 6 15` pede confirmação para buscar cobertura nas seis horas antes
+do culto, com quinze minutos de resposta por convite. Aceita horizonte de 1 a
+72 horas e prazo de 1 a 120 minutos. `EMERGENCIAS DESATIVAR` impede novas ofertas,
+também após confirmação; convites já emitidos mantêm sua validade original.
+A política começa desativada. A fila elegível tem prioridade e pedidos de
+substituição são atendidos pelo culto mais próximo. O voluntário recebe um
+convite urgente `A<id>` e precisa aceitar. A coordenação é avisada quando faltam
+candidatos ou a cobertura depende de convites pendentes. Não há confirmação
+por silêncio nem autorização automática de terceiro dia.
+
 ## Lembretes automáticos
 
 No menu da coordenação, `LEMBRETES 1 09:00` pede confirmação para avisar um dia
