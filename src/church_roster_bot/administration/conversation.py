@@ -25,6 +25,7 @@ from church_roster_bot.members.models import Coordinator, Volunteer, VolunteerRo
 from church_roster_bot.members.schemas import VolunteerCreate
 from church_roster_bot.ministries.models import Role
 from church_roster_bot.notifications.invitations import DELIVERY_LABELS, enqueue_invitation
+from church_roster_bot.scheduling.automation import configure_opening
 from church_roster_bot.scheduling.distribution import DistributionPlanner
 from church_roster_bot.scheduling.engine import OCCUPYING
 from church_roster_bot.scheduling.errors import RosterError
@@ -128,6 +129,37 @@ class AdminConversationMixin:
                     f"Para convidar, envie APROVAR {proposal_id}. "
                     "Nenhuma inscrição ou convite foi criado.",
                 )
+            elif upper.startswith("ABERTURA "):
+                parts = upper.split()
+                if parts == ["ABERTURA", "DESATIVAR"]:
+                    self._state(session, "admin_opening_confirm", opening_enabled=False)
+                    prompt = "Desativar a abertura mensal automática deste ministério?"
+                elif len(parts) == 3:
+                    day, hour = int(parts[1]), time.fromisoformat(parts[2])
+                    if (
+                        not 1 <= day <= 28
+                        or hour.tzinfo is not None
+                        or hour.second
+                        or hour.microsecond
+                    ):
+                        raise RosterError("use ABERTURA <dia 1..28> <HH:MM>")
+                    self._state(
+                        session,
+                        "admin_opening_confirm",
+                        opening_enabled=True,
+                        opening_day=day,
+                        opening_hour=hour.isoformat(),
+                    )
+                    prompt = (
+                        f"Abrir as escalas no dia {day} do mês anterior às {hour:%H:%M}, "
+                        "no fuso da igreja? Apenas meses com cultos cadastrados. "
+                        "Aberturas vencidas do mês atual podem ser recuperadas."
+                    )
+                else:
+                    raise RosterError("use ABERTURA <dia 1..28> <HH:MM> ou ABERTURA DESATIVAR")
+                self._send(
+                    db, phone, buttons_payload(prompt, [("SIM", "Confirmar"), ("NAO", "Cancelar")])
+                )
             elif upper.startswith(("VERPROPOSTA ", "DESCARTAR ", "APROVAR ")):
                 proposal_id = int(text.split()[1])
                 proposal = require_proposal(db, proposal_id, ministry.id, actor_type, actor_id)
@@ -162,7 +194,26 @@ class AdminConversationMixin:
             else:
                 self._menu(db, session, None, coordinator, None)
             return
-        if state == "admin_approve_proposal_confirm":
+        if state == "admin_opening_confirm":
+            if upper == "SIM":
+                options = (
+                    {"day": data["opening_day"], "hour": time.fromisoformat(data["opening_hour"])}
+                    if data["opening_enabled"]
+                    else {}
+                )
+                configure_opening(
+                    db,
+                    ministry.id,
+                    actor_type,
+                    actor_id,
+                    enabled=data["opening_enabled"],
+                    **options,
+                )
+                self._text(db, phone, "Abertura mensal automática configurada.")
+            else:
+                self._text(db, phone, "Configuração descartada.")
+            self._state(session, "menu")
+        elif state == "admin_approve_proposal_confirm":
             if upper == "SIM":
                 invitations = approve_proposal(
                     db,

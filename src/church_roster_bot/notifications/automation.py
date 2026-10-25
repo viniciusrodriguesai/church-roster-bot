@@ -9,9 +9,10 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from church_roster_bot.core.config import Settings
 from church_roster_bot.core.time import database_utc, local_to_utc, utc_now
-from church_roster_bot.members.models import Coordinator, CoordinatorMinistry, Volunteer
+from church_roster_bot.members.models import Volunteer
 from church_roster_bot.ministries.models import Church, Ministry, Role
-from church_roster_bot.notifications.outbox import apply_window, window_open
+from church_roster_bot.notifications.coordinators import notify_ministry
+from church_roster_bot.notifications.outbox import window_open
 from church_roster_bot.scheduling.engine import RosterEngine
 from church_roster_bot.scheduling.errors import RosterError
 from church_roster_bot.scheduling.models import AutomationInvitation
@@ -74,31 +75,14 @@ def notify_offer(
 ) -> None:
     slot = db.get(Slot, offer.slot_id)
     service = db.get(WorshipService, slot.service_id)
-    ministry = db.get(Ministry, service.ministry_id)
     member = db.get(Volunteer, offer.volunteer_id)
-    for coordinator in db.scalars(
-        select(Coordinator)
-        .join(CoordinatorMinistry, CoordinatorMinistry.coordinator_id == Coordinator.id)
-        .where(
-            CoordinatorMinistry.ministry_id == ministry.id,
-            Coordinator.church_id == ministry.church_id,
-            Coordinator.active.is_(True),
-        )
-    ):
-        key = f"automation:{offer.id}:{status}:{coordinator.id}"
-        if db.scalar(select(OutboundMessage.id).where(OutboundMessage.dedupe_key == key)):
-            continue
-        body = (
-            f"Convite A{offer.id} — {member.name}, {service.service_date:%d/%m/%Y} "
-            f"{service.start_time:%H:%M}: {LABELS.get(status, status)}."
-        )
-        if error:
-            body += f" Código: {error}."
-        outgoing = OutboundMessage(
-            recipient_e164=coordinator.phone_e164, payload=text_payload(body), dedupe_key=key
-        )
-        apply_window(db, outgoing, config)
-        db.add(outgoing)
+    body = (
+        f"Convite A{offer.id} — {member.name}, {service.service_date:%d/%m/%Y} "
+        f"{service.start_time:%H:%M}: {LABELS.get(status, status)}."
+    )
+    if error:
+        body += f" Código: {error}."
+    notify_ministry(db, service.ministry_id, f"automation:{offer.id}:{status}", body, config)
 
 
 def prepare_offer(

@@ -1,4 +1,4 @@
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time
 
 from sqlalchemy import (
     JSON,
@@ -8,6 +8,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     String,
+    Time,
     UniqueConstraint,
     text,
 )
@@ -185,3 +186,16 @@ class AutomationInvitation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AutomationPolicy(Base):
+    __tablename__ = "automation_policies"
+    __table_args__ = (CheckConstraint("opening_day BETWEEN 1 AND 28", name="valid_opening_day"),)
+
+    ministry_id: Mapped[int] = mapped_column(ForeignKey("ministries.id"), primary_key=True)
+    opening_enabled: Mapped[bool] = mapped_column(nullable=False, default=False)
+    opening_day: Mapped[int] = mapped_column(nullable=False, default=25)
+    opening_time: Mapped[time] = mapped_column(
+        Time(timezone=False), nullable=False, default=time(9)
+    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

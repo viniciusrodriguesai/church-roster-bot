@@ -32,6 +32,15 @@ recebe o resultado automaticamente. O aceite verifica novamente todas as regras;
 envio e leitura não confirmam participação. `A<id>` identifica convites normais
 da automação e não interfere nas exceções `ACEITAR <id>` da Fase 2.
 
+## Abertura mensal automática
+
+No menu do coordenador ou administrador com ministério selecionado, envie
+`ABERTURA 25 09:00`, por exemplo, e confirme com `SIM`. O mês seguinte será
+aberto no dia 25 às 09:00 do mês anterior, no fuso da igreja, se houver cultos
+cadastrados. O worker também recupera aberturas vencidas do mês atual quando
+ainda existem cultos futuros; escalas encerradas não são reabertas.
+`ABERTURA DESATIVAR` pede confirmação para desabilitar a rotina.
+
 ## Administrador geral
 
 Para editar data ou horário de um culto, entre em Configurar cultos e envie `EDITAR <culto_id>`, seguido por `DATA AAAA-MM-DD` ou `HORA HH:MM`. A confirmação só é aplicada se o culto não tiver participações ativas nem estiver publicado ou encerrado; isso evita mover compromissos já assumidos.

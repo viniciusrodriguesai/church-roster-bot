@@ -24,6 +24,12 @@ oferecido, incluindo seu fuso; alterações cancelam o convite. A manutenção d
 worker expira convites de forma transacional e idempotente, sem exigir entrada
 de um usuário. Exceções numéricas da Fase 2 mantêm seu fluxo independente.
 
+`scheduling.automation` executa a abertura mensal optativa com políticas por
+ministério. O worker verifica as tarefas periodicamente, sem depender de mensagens
+recebidas. `notifications.coordinators` centraliza os avisos deduplicados e seu
+escopo de igreja/ministério. A política começa desabilitada; a configuração
+exige confirmação de um coordenador ou administrador autorizado.
+
 O simulador escreve o mesmo evento de entrada e usa o mesmo worker e roteador. Ele **não chama a Meta**. Os testes rápidos usam SQLite; a CI usa PostgreSQL para migração e concorrência. Em produção, use somente PostgreSQL.
 
 No terminal, uma thread processa e entrega mensagens com transporte local e consulta a caixa recebida enquanto a entrada de texto aguarda no processo principal. Assim, um convite iniciado em outro terminal aparece sem nova entrada. Transações de processamento e reserva de envio usam `BEGIN IMMEDIATE` no SQLite para serializar os terminais locais, enquanto o PostgreSQL mantém os bloqueios de linha existentes.

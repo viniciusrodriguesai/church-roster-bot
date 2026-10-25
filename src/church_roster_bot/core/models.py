@@ -14,6 +14,7 @@ from church_roster_bot.ministries.models import Church, Ministry, Role, RoleConf
 from church_roster_bot.scheduling.models import (
     Assignment,
     AutomationInvitation,
+    AutomationPolicy,
     MonthlySchedule,
     ReplacementRequest,
     RosterProposal,
@@ -26,6 +27,7 @@ from church_roster_bot.whatsapp.models import InboundEvent, OutboundMessage
 __all__ = [
     "Assignment",
     "AutomationInvitation",
+    "AutomationPolicy",
     "AuditEvent",
     "Church",
     "ConversationSession",

@@ -37,6 +37,13 @@ distingue decisões de arquitetura de funcionalidades já entregues.
   a decisão. Repetir a aprovação ou o aceite não duplica convites, inscrições
   ou avisos. Uma impressão digital impede aceitar um culto movido depois do
   convite. O prazo termina no início do culto ou na validade configurada.
+- `ABERTURA <dia 1..28> <HH:MM>` configura a abertura mensal após confirmação.
+  O worker abre o mês no dia e horário do mês anterior, usando o fuso da igreja,
+  e avisa a coordenação. Só meses com cultos cadastrados entram na rotina;
+  aberturas vencidas do mês atual são recuperadas se ainda há cultos futuros.
+  Escalas abertas, em revisão, publicadas, fechadas ou canceladas não são
+  sobrescritas. `ABERTURA DESATIVAR` desliga a rotina após confirmação e preserva
+  a configuração. A automação é optativa e começa sem políticas habilitadas.
 
 ## Decisão: proposta, aprovação e confirmação são operações distintas
 
@@ -204,3 +211,13 @@ writer aberto e verifica que os terminais preservam a entrada, que eventos
 pendentes não consomem tentativas e que um bloqueio no recibo após o transporte
 não repete o envio. Somente códigos de contenção SQLite são tratados assim;
 outras falhas operacionais propagam normalmente.
+
+## Abertura mensal
+
+`d31a0f9e2468` acrescenta `automation_policies` sem modificar escalas existentes.
+A configuração é por ministério e auditada. O limite de dia 28 permite o mesmo
+agendamento em todos os meses. A manutenção usa UTC para comparar instantes e
+o fuso IANA da igreja para interpretar o horário configurado. Horários locais
+inexistentes geram um aviso deduplicado para revisão, em vez de abrir a escala
+em outro horário. Reiniciar o worker recupera execuções vencidas, sem repetir
+aberturas ou avisos já registrados. Falha no envio do aviso não desfaz a abertura.

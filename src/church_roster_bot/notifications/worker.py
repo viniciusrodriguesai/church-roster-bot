@@ -12,6 +12,7 @@ from church_roster_bot.core.database import SessionLocal, is_sqlite_busy, retry_
 from church_roster_bot.notifications.automation import notify_offer, prepare_offer
 from church_roster_bot.notifications.invitations import notify_coordinator, prepare_invitation
 from church_roster_bot.notifications.outbox import apply_window
+from church_roster_bot.scheduling.automation import open_monthly_schedules
 from church_roster_bot.scheduling.models import AutomationInvitation, ThirdDayRequest
 from church_roster_bot.scheduling.offers import expire_offers
 from church_roster_bot.whatsapp.client import MetaSendError, WhatsAppClient
@@ -34,6 +35,7 @@ class Worker:
         self.client = client or WhatsAppClient(config)
         self.bot = Bot(session_factory, config)
         self._current_event_id: int | None = None
+        self._maintenance_after = 0.0
 
     def process_one(self) -> bool:
         self._current_event_id = None
@@ -220,10 +222,15 @@ class Worker:
                 time.sleep(5)
 
     def maintain(self) -> bool:
+        if time.monotonic() < self._maintenance_after:
+            return False
         try:
             with self.session_factory.begin() as db:
                 lock_simulation_transaction(db)
-                return bool(expire_offers(db, self.config))
+                expired = expire_offers(db, self.config)
+                opened = open_monthly_schedules(db, self.config)
+            self._maintenance_after = time.monotonic() + 1
+            return bool(expired or opened)
         except Exception as exc:
             if is_sqlite_busy(exc):
                 return False
