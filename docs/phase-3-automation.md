@@ -267,3 +267,27 @@ Mensagens legadas permanecem sem esse vínculo. Upgrade, downgrade, preservaçã
 dos dados e comparação de metadados são testados em SQLite temporário e
 PostgreSQL descartável. Os avisos vinculados revalidam consentimento e telefone
 antes do transporte; `INICIAR` libera somente bloqueios sem tentativa prévia.
+
+## Lembretes configuráveis
+
+`031c7a9d2458` cria políticas de lembrete desabilitadas por padrão e acrescenta
+campos opcionais na outbox, preservando mensagens existentes. Um índice único
+em `reminder_assignment_id` é o registro durável de idempotência: cada participação
+tem no máximo um lembrete, inclusive após reinício, dois agendadores ou mudanças
+na política. Upgrade/downgrade, dados legados e metadados têm testes nos dois bancos.
+
+O coordenador define dias de antecedência (0..30) e horário civil. O horário é
+interpretado no fuso IANA da igreja e convertido para UTC. Horários inexistentes
+ou posteriores ao início do culto geram aviso deduplicado para revisão. Um worker
+que reinicia atrasado recupera somente lembretes anteriores a cultos ainda futuros.
+A outbox preserva o horário devido e a identidade do culto na criação; alterar
+a antecedência afeta participações ainda sem lembrete registrado. Desativar a
+política cancela lembretes pendentes no momento da revalidação de envio.
+
+Antes de enviar, o worker exige participação ainda confirmada, culto inalterado,
+política ativa, consentimento e telefone atual. A janela de 24 horas ou o template
+específico aprovado continuam obrigatórios. Bloqueios sem tentativa podem ser
+liberados por `INICIAR`, sujeitos a nova validação; horários vencidos após início
+do culto são cancelados. Resultados incertos nunca são reenviados automaticamente
+e a coordenação é avisada. Uma correção regressiva do relógio adia o envio até
+o instante UTC registrado, sem consumir tentativa.

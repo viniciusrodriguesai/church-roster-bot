@@ -159,6 +159,7 @@ def run_terminal(
         whatsapp_invite_template="simulacao_convite",
         whatsapp_notification_template="simulacao_notificacao",
         whatsapp_automation_template="simulacao_automacao",
+        whatsapp_reminder_template="simulacao_lembrete",
     )
     worker = Worker(session_factory=factory, config=config, client=SimulationClient())
     inbox = TerminalInbox(phone, factory)

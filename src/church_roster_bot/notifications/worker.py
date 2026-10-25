@@ -13,9 +13,11 @@ from church_roster_bot.notifications.automation import notify_offer, prepare_off
 from church_roster_bot.notifications.invitations import notify_coordinator, prepare_invitation
 from church_roster_bot.notifications.members import prepare_member_notice
 from church_roster_bot.notifications.outbox import apply_window
+from church_roster_bot.notifications.reminders import notify_reminder_delivery, prepare_reminder
 from church_roster_bot.scheduling.automation import open_monthly_schedules
 from church_roster_bot.scheduling.models import AutomationInvitation, ThirdDayRequest
 from church_roster_bot.scheduling.offers import expire_offers
+from church_roster_bot.scheduling.reminders import enqueue_reminders
 from church_roster_bot.scheduling.replacements import dispatch_replacements
 from church_roster_bot.scheduling.waitlist import dispatch_waitlist
 from church_roster_bot.whatsapp.client import MetaSendError, WhatsAppClient
@@ -130,6 +132,8 @@ class Worker:
                 prepare_offer(db, outgoing, self.config)
             elif outgoing.invitation_id:
                 prepare_invitation(db, outgoing, self.config)
+            elif outgoing.reminder_assignment_id:
+                prepare_reminder(db, outgoing, self.config)
             elif outgoing.volunteer_id:
                 prepare_member_notice(db, outgoing, self.config)
             else:
@@ -184,7 +188,10 @@ class Worker:
         return True
 
     def _notify_delivery(self, db, outgoing: OutboundMessage) -> None:
-        if outgoing.automation_invitation_id:
+        if outgoing.reminder_assignment_id:
+            if outgoing.status in {"blocked_consent", "blocked_window", "failed", "unknown"}:
+                notify_reminder_delivery(db, outgoing, self.config)
+        elif outgoing.automation_invitation_id:
             if outgoing.status not in {"blocked_consent", "blocked_window", "failed", "unknown"}:
                 return
             notify_offer(
@@ -238,6 +245,7 @@ class Worker:
                 lambda db: open_monthly_schedules(db, self.config),
                 lambda db: dispatch_waitlist(db, self.bot.roster, self.config),
                 lambda db: dispatch_replacements(db, self.bot.roster, self.config),
+                lambda db: enqueue_reminders(db, self.config),
             ):
                 with self.session_factory.begin() as db:
                     lock_simulation_transaction(db)

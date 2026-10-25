@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     whatsapp_invite_template: str = ""
     whatsapp_notification_template: str = ""
     whatsapp_automation_template: str = ""
+    whatsapp_reminder_template: str = ""
     automation_invite_ttl_hours: int = Field(default=48, ge=1, le=168)
     whatsapp_template_language: str = "pt_BR"
     conversation_ttl_minutes: int = Field(default=30, ge=1, le=1440)

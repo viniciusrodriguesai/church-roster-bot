@@ -201,6 +201,17 @@ class AutomationPolicy(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class ReminderPolicy(Base):
+    __tablename__ = "reminder_policies"
+    __table_args__ = (CheckConstraint("days_before BETWEEN 0 AND 30", name="valid_reminder_days"),)
+
+    ministry_id: Mapped[int] = mapped_column(ForeignKey("ministries.id"), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(nullable=False, default=False)
+    days_before: Mapped[int] = mapped_column(nullable=False, default=1)
+    local_time: Mapped[time] = mapped_column(Time(timezone=False), nullable=False, default=time(9))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class WaitlistEntry(Base):
     __tablename__ = "waitlist_entries"
     __table_args__ = (

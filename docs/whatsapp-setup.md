@@ -12,6 +12,12 @@ O webhook usa os bytes originais e `X-Hub-Signature-256`. Rejeita assinatura inv
 
 ## Contrato dos templates aprovados
 
+`WHATSAPP_REMINDER_TEMPLATE` é um template aprovado separado para lembretes,
+com um parâmetro de texto no corpo e sem botões. O corpo inclui participação,
+data, horário, função e orientação para informar indisponibilidade. Sem esse
+template, lembretes fora da janela de 24 horas ficam bloqueados. O simulador
+usa um nome fictício e transporte local.
+
 Para convites normais da Fase 3, `WHATSAPP_AUTOMATION_TEMPLATE` usa **um parâmetro
 de texto no corpo** e dois botões de resposta rápida: ACEITAR (índice 0) e RECUSAR
 (índice 1). O worker preenche os payloads `ACEITAR A<id>` e `RECUSAR A<id>`. O corpo

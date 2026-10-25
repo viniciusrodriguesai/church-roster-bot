@@ -61,6 +61,17 @@ cadastrados. O worker também recupera aberturas vencidas do mês atual quando
 ainda existem cultos futuros; escalas encerradas não são reabertas.
 `ABERTURA DESATIVAR` pede confirmação para desabilitar a rotina.
 
+## Lembretes automáticos
+
+No menu da coordenação, `LEMBRETES 1 09:00` pede confirmação para avisar um dia
+antes às 09:00, no fuso da igreja. A antecedência aceita 0 a 30 dias; zero permite
+um horário no próprio dia, desde que anterior ao culto. `LEMBRETES DESATIVAR`
+também exige `SIM`. A política começa desativada. O worker recupera lembretes
+vencidos somente enquanto o culto ainda não começou. Cada participação confirmada
+recebe no máximo um lembrete; pedidos de substituição não são lembrados como
+presença confirmada. Fora da janela de conversa, é necessário o template aprovado
+`WHATSAPP_REMINDER_TEMPLATE`; sem consentimento ou template, a entrega fica bloqueada.
+
 ## Administrador geral
 
 Para editar data ou horário de um culto, entre em Configurar cultos e envie `EDITAR <culto_id>`, seguido por `DATA AAAA-MM-DD` ou `HORA HH:MM`. A confirmação só é aplicada se o culto não tiver participações ativas nem estiver publicado ou encerrado; isso evita mover compromissos já assumidos.

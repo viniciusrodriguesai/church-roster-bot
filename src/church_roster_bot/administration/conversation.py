@@ -47,6 +47,7 @@ from church_roster_bot.scheduling.proposals import (
     proposal_snapshot,
     require_proposal,
 )
+from church_roster_bot.scheduling.reminders import configure_reminders
 from church_roster_bot.services.models import Slot, WorshipService
 from church_roster_bot.whatsapp.models import OutboundMessage
 from church_roster_bot.whatsapp.payloads import buttons_payload, normalize_phone, text_payload
@@ -129,6 +130,31 @@ class AdminConversationMixin:
                     f"Para convidar, envie APROVAR {proposal_id}. "
                     "Nenhuma inscrição ou convite foi criado.",
                 )
+            elif upper.startswith("LEMBRETES "):
+                parts = upper.split()
+                if parts == ["LEMBRETES", "DESATIVAR"]:
+                    self._state(session, "admin_reminders_confirm", reminders_enabled=False)
+                    prompt = "Desativar os lembretes automáticos deste ministério?"
+                elif len(parts) == 3:
+                    days, hour = int(parts[1]), time.fromisoformat(parts[2])
+                    if not 0 <= days <= 30 or hour.tzinfo or hour.second or hour.microsecond:
+                        raise RosterError("use LEMBRETES <dias 0..30> <HH:MM>")
+                    self._state(
+                        session,
+                        "admin_reminders_confirm",
+                        reminders_enabled=True,
+                        reminder_days=days,
+                        reminder_hour=hour.isoformat(),
+                    )
+                    prompt = (
+                        f"Lembrar {days} dia(s) antes, às {hour:%H:%M} no fuso da igreja? "
+                        "Somente participações confirmadas, com consentimento e envio permitido."
+                    )
+                else:
+                    raise RosterError("use LEMBRETES <dias 0..30> <HH:MM> ou LEMBRETES DESATIVAR")
+                self._send(
+                    db, phone, buttons_payload(prompt, [("SIM", "Confirmar"), ("NAO", "Cancelar")])
+                )
             elif upper.startswith("ABERTURA "):
                 parts = upper.split()
                 if parts == ["ABERTURA", "DESATIVAR"]:
@@ -194,7 +220,29 @@ class AdminConversationMixin:
             else:
                 self._menu(db, session, None, coordinator, None)
             return
-        if state == "admin_opening_confirm":
+        if state == "admin_reminders_confirm":
+            if upper == "SIM":
+                options = (
+                    {
+                        "days": data["reminder_days"],
+                        "hour": time.fromisoformat(data["reminder_hour"]),
+                    }
+                    if data["reminders_enabled"]
+                    else {}
+                )
+                configure_reminders(
+                    db,
+                    ministry.id,
+                    actor_type,
+                    actor_id,
+                    enabled=data["reminders_enabled"],
+                    **options,
+                )
+                self._text(db, phone, "Lembretes automáticos configurados.")
+            else:
+                self._text(db, phone, "Configuração descartada.")
+            self._state(session, "menu")
+        elif state == "admin_opening_confirm":
             if upper == "SIM":
                 options = (
                     {"day": data["opening_day"], "hour": time.fromisoformat(data["opening_hour"])}
