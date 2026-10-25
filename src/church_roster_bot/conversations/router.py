@@ -25,6 +25,7 @@ from church_roster_bot.members.models import (
 from church_roster_bot.ministries.models import Church, Ministry, Role
 from church_roster_bot.notifications.automation import activate_offers
 from church_roster_bot.notifications.invitations import activate_invitations, notify_coordinator
+from church_roster_bot.notifications.members import activate_member_notices
 from church_roster_bot.notifications.outbox import apply_window
 from church_roster_bot.scheduling.engine import RosterEngine
 from church_roster_bot.scheduling.errors import MonthlyLimit, NoCapacity, RosterError
@@ -203,6 +204,7 @@ class Bot(AdminConversationMixin):
                 db.flush()
                 activate_invitations(db, volunteer.id, self.config)
                 activate_offers(db, volunteer.id, self.config)
+                activate_member_notices(db, volunteer.id, self.config)
             self._text(db, phone, "Convites ativados.")
             return
         if upper in {"MENU", "CANCELAR"}:

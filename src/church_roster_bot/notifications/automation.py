@@ -1,22 +1,21 @@
 """Durable, consent-aware delivery for normal invitations from roster automation."""
 
-import hashlib
-import json
 from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from church_roster_bot.core.config import Settings
-from church_roster_bot.core.time import database_utc, local_to_utc, utc_now
+from church_roster_bot.core.time import database_utc, utc_now
 from church_roster_bot.members.models import Volunteer
-from church_roster_bot.ministries.models import Church, Ministry, Role
+from church_roster_bot.ministries.models import Role
 from church_roster_bot.notifications.coordinators import notify_ministry
 from church_roster_bot.notifications.outbox import window_open
 from church_roster_bot.scheduling.engine import RosterEngine
 from church_roster_bot.scheduling.errors import RosterError
 from church_roster_bot.scheduling.models import AutomationInvitation
 from church_roster_bot.services.models import Slot, WorshipService
+from church_roster_bot.services.timing import service_fingerprint, service_start
 from church_roster_bot.whatsapp.models import OutboundMessage
 from church_roster_bot.whatsapp.payloads import buttons_payload, template_payload, text_payload
 
@@ -30,27 +29,6 @@ LABELS = {
     "failed": "falha no envio",
     "unknown": "envio incerto; não reenviar automaticamente",
 }
-
-
-def service_start(db: Session, service: WorshipService) -> datetime:
-    ministry = db.get(Ministry, service.ministry_id)
-    church = db.get(Church, ministry.church_id)
-    return local_to_utc(service.service_date, service.start_time, church.timezone)
-
-
-def service_fingerprint(db: Session, slot: Slot) -> str:
-    service = db.get(WorshipService, slot.service_id)
-    ministry = db.get(Ministry, service.ministry_id)
-    church = db.get(Church, ministry.church_id)
-    values = (
-        service.id,
-        service.ministry_id,
-        service.service_date.isoformat(),
-        service.start_time.isoformat(),
-        slot.role_id,
-        church.timezone,
-    )
-    return hashlib.sha256(json.dumps(values).encode()).hexdigest()
 
 
 def offer_text(db: Session, offer: AutomationInvitation) -> str:
@@ -118,9 +96,11 @@ def prepare_offer(
             raise RosterError("service changed after invitation was prepared")
         if service_start(db, service) <= instant:
             raise RosterError("service has already started")
-        RosterEngine(sessionmaker(bind=db.get_bind())).check_assignment(
-            db, member.id, slot.id, allow_published=True
-        )
+        roster = RosterEngine(sessionmaker(bind=db.get_bind()))
+        if offer.kind == "replacement":
+            roster.check_replacement(db, member.id, offer.replacement_request_id)
+        else:
+            roster.check_assignment(db, member.id, slot.id, allow_published=True)
     except (RosterError, ValueError):
         offer.status, outgoing.status = "cancelled", "cancelled"
         notify_offer(db, offer, "cancelled", config)

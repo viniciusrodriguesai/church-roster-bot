@@ -243,3 +243,27 @@ As fases de manutenção usam transações distintas: expiração, abertura e of
 de vagas não carregam bloqueios de uma fase para a outra. A fila bloqueia
 voluntários, vagas, convites e entradas nessa ordem, com IDs crescentes. Contenção
 e atualização concorrente são testadas em PostgreSQL e SQLite em arquivo.
+
+## Substituição automática
+
+O worker acompanha `ReplacementRequest` pendentes e convida um substituto por
+vez. A classificação reutiliza carga mensal e histórico, exclui o original e
+quem já respondeu ou recebeu convite para o mesmo pedido. Consentimento,
+permissões, indisponibilidade, conflitos e limite de dois dias continuam
+obrigatórios. A consulta simula a liberação de exatamente uma posição original;
+nenhuma participação é criada antes do aceite. Pedidos sem candidato geram um
+aviso deduplicado e podem ser recuperados quando alguém se tornar elegível.
+
+O aceite usa a troca atômica existente e revalida as regras sob bloqueios. A
+troca manual segue a mesma ordem: voluntário, vaga, pedido e original. Uma
+troca manual concorrente torna o convite automático obsoleto; somente uma
+substituição vence. O coordenador recebe os estados dos convites e o original
+recebe aviso deduplicado após a confirmação. Falha no aviso não desfaz a troca;
+envio incerto não é repetido automaticamente. Horários de culto inválidos
+geram aviso de revisão sem interromper os demais ciclos de manutenção.
+
+`f31a8b2c7406` adiciona somente o vínculo opcional `volunteer_id` na outbox.
+Mensagens legadas permanecem sem esse vínculo. Upgrade, downgrade, preservação
+dos dados e comparação de metadados são testados em SQLite temporário e
+PostgreSQL descartável. Os avisos vinculados revalidam consentimento e telefone
+antes do transporte; `INICIAR` libera somente bloqueios sem tentativa prévia.

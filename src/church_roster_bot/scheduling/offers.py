@@ -19,13 +19,19 @@ from church_roster_bot.notifications.automation import (
 from church_roster_bot.scheduling.engine import AssignmentIntent, RosterEngine
 from church_roster_bot.scheduling.errors import NotAuthorized, RosterError
 from church_roster_bot.scheduling.invitations import create_invitation
-from church_roster_bot.scheduling.lifecycle import audit, publish_schedule, schedule_for
+from church_roster_bot.scheduling.lifecycle import (
+    audit,
+    manual_replace,
+    publish_schedule,
+    schedule_for,
+)
 from church_roster_bot.scheduling.models import (
     AutomationInvitation,
     RosterProposalItem,
     WaitlistEntry,
 )
 from church_roster_bot.scheduling.proposals import proposal_snapshot, require_proposal
+from church_roster_bot.scheduling.replacements import replacement_completed
 from church_roster_bot.services.models import Slot, WorshipService
 
 
@@ -144,7 +150,6 @@ def respond_offer(
     *,
     now: datetime | None = None,
 ) -> OfferDecision:
-    instant = utc_now(now)
     with db.begin_nested():
         original = db.get(AutomationInvitation, offer_id)
         if original is None or original.volunteer_id != volunteer_id:
@@ -158,24 +163,41 @@ def respond_offer(
         )
         if offer.status != "pending":
             return OfferDecision(offer.status, offer.assignment_id)
+        instant = utc_now(now)
         service = db.get(WorshipService, slot.service_id)
-        if service_fingerprint(db, slot) != offer.service_fingerprint:
+        try:
+            started = service_start(db, service) <= instant
+        except ValueError:
+            started = False
+            valid_time = False
+        else:
+            valid_time = True
+        if not valid_time or service_fingerprint(db, slot) != offer.service_fingerprint:
             offer.status = "cancelled"
-        elif database_utc(offer.expires_at) <= instant or service_start(db, service) <= instant:
+        elif database_utc(offer.expires_at) <= instant or started:
             offer.status = "expired"
         elif not accept:
             offer.status = "declined"
         else:
             try:
                 with db.begin_nested():
-                    assignment_id = roster._assign_locked(db, member, slot, allow_published=True)
+                    if offer.kind == "replacement":
+                        assignment_id = manual_replace(
+                            db, roster, offer.replacement_request_id, volunteer_id, now=instant
+                        )
+                    else:
+                        assignment_id = roster._assign_locked(
+                            db, member, slot, allow_published=True
+                        )
             except RosterError:
                 offer.status = "cancelled"
             else:
                 offer.status, offer.assignment_id = "accepted", assignment_id
                 schedule = schedule_for(db, service.ministry_id, service.service_date)
-                if schedule and schedule.state == "published":
+                if schedule and schedule.state == "published" and offer.kind != "replacement":
                     publish_schedule(db, service.ministry_id, service.service_date)
+                if offer.kind == "replacement":
+                    replacement_completed(db, offer.replacement_request_id, config)
         offer.responded_at = instant
         _update_waitlist(db, offer, instant)
         notify_offer(db, offer, offer.status, config)

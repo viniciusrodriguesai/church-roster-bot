@@ -32,6 +32,17 @@ recebe o resultado automaticamente. O aceite verifica novamente todas as regras;
 envio e leitura não confirmam participação. `A<id>` identifica convites normais
 da automação e não interfere nas exceções `ACEITAR <id>` da Fase 2.
 
+## Substituição automática
+
+Após registrar indisponibilidade para uma participação ou confirmar um pedido
+pelo menu `4`, o worker procura substitutos sem exigir comandos da coordenação.
+O candidato recebe `A<id>` e responde `ACEITAR A<id>` ou `RECUSAR A<id>`.
+O original permanece na escala até a troca aceita. Recusa ou expiração permite
+chamar a próxima pessoa elegível. A coordenação recebe os estados dos convites
+e um aviso quando não há candidato; o original recebe aviso após a confirmação.
+Esses avisos respeitam consentimento e templates. A troca manual continua
+disponível e uma disputa com aceite automático confirma apenas um substituto.
+
 ## Lista de espera
 
 O voluntário pode enviar `ESPERA <vaga_id>` para entrar, `MINHAESPERA` para

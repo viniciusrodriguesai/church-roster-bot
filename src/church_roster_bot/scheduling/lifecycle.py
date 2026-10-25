@@ -2,13 +2,14 @@
 
 import hashlib
 import json
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from difflib import ndiff
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from church_roster_bot.audit.models import AuditEvent, ScheduleVersion
+from church_roster_bot.core.time import utc_now
 from church_roster_bot.members.models import Volunteer
 from church_roster_bot.ministries.models import Ministry, Role
 from church_roster_bot.scheduling.engine import OCCUPYING, RosterEngine
@@ -20,6 +21,7 @@ from church_roster_bot.scheduling.models import (
     ThirdDayRequest,
 )
 from church_roster_bot.services.models import Slot, WorshipService
+from church_roster_bot.services.timing import service_start
 
 SCHEDULE_TRANSITIONS = {
     "draft": {"open", "cancelled"},
@@ -106,13 +108,19 @@ def set_slot_capacity(db: Session, slot_id: int, capacity: int) -> None:
     slot.capacity = capacity
 
 
-def request_replacement(db: Session, volunteer_id: int, assignment_id: int) -> int:
+def request_replacement(
+    db: Session,
+    volunteer_id: int,
+    assignment_id: int,
+    *,
+    now: datetime | None = None,
+) -> int:
     assignment = db.get(Assignment, assignment_id, with_for_update=True)
     if assignment is None or assignment.volunteer_id != volunteer_id:
         raise NotFound("assignment not found for this volunteer")
     slot = db.get(Slot, assignment.slot_id)
     service = db.get(WorshipService, slot.service_id)
-    if service.service_date < datetime.now(UTC).date():
+    if service_start(db, service) <= utc_now(now):
         raise RosterError("past service cannot be replaced")
     transition_assignment(assignment, "replacement_requested")
     request = ReplacementRequest(assignment_id=assignment_id)
@@ -122,32 +130,49 @@ def request_replacement(db: Session, volunteer_id: int, assignment_id: int) -> i
 
 
 def manual_replace(
-    db: Session, roster: RosterEngine, request_id: int, replacement_volunteer_id: int
+    db: Session,
+    roster: RosterEngine,
+    request_id: int,
+    replacement_volunteer_id: int,
+    *,
+    now: datetime | None = None,
 ) -> int:
     with db.begin_nested():
-        return _manual_replace(db, roster, request_id, replacement_volunteer_id)
+        return _manual_replace(db, roster, request_id, replacement_volunteer_id, now=now)
 
 
 def _manual_replace(
-    db: Session, roster: RosterEngine, request_id: int, replacement_volunteer_id: int
+    db: Session,
+    roster: RosterEngine,
+    request_id: int,
+    replacement_volunteer_id: int,
+    *,
+    now: datetime | None = None,
 ) -> int:
-    request = db.get(ReplacementRequest, request_id, with_for_update=True)
+    request = db.get(ReplacementRequest, request_id)
     if request is None or request.status != "pending":
         raise NotFound("pending replacement not found")
-    original = db.get(Assignment, request.assignment_id, with_for_update=True)
+    original = db.get(Assignment, request.assignment_id)
+    # Same order as automatic acceptance: member, slot, request, original.
+    member, slot = roster._lock_member_slot(db, replacement_volunteer_id, original.slot_id)
+    request = db.get(ReplacementRequest, request_id, with_for_update=True, populate_existing=True)
+    if request.status != "pending":
+        raise NotFound("pending replacement not found")
+    original = db.get(
+        Assignment, request.assignment_id, with_for_update=True, populate_existing=True
+    )
     if original.status != "replacement_requested":
         raise RosterError("original assignment is not awaiting replacement")
     if original.volunteer_id == replacement_volunteer_id:
         raise RosterError("replacement must be a different volunteer")
     old_slot = db.get(Slot, original.slot_id)
     old_service = db.get(WorshipService, old_slot.service_id)
+    if service_start(db, old_service) <= utc_now(now):
+        raise RosterError("past service cannot be replaced")
     schedule = schedule_for(db, old_service.ministry_id, old_service.service_date)
     if schedule and schedule.state in {"closed", "cancelled"}:
         raise RosterError("closed schedule cannot be changed")
-    db.get(Volunteer, replacement_volunteer_id, with_for_update=True)
-    db.get(Slot, original.slot_id, with_for_update=True)
     transition_assignment(original, "replaced")
-    member, slot = roster._lock_member_slot(db, replacement_volunteer_id, original.slot_id)
     replacement_id = roster._assign_locked(db, member, slot, allow_published=True)
     request.status = "fulfilled"
     request.replacement_assignment_id = replacement_id

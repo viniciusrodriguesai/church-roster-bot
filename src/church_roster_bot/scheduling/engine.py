@@ -26,7 +26,12 @@ from church_roster_bot.scheduling.errors import (
     RosterError,
     Unavailable,
 )
-from church_roster_bot.scheduling.models import Assignment, MonthlySchedule, ThirdDayRequest
+from church_roster_bot.scheduling.models import (
+    Assignment,
+    MonthlySchedule,
+    ReplacementRequest,
+    ThirdDayRequest,
+)
 from church_roster_bot.services.models import Slot, WorshipService
 
 SessionFactory = Callable[[], Session]
@@ -195,6 +200,25 @@ class RosterEngine:
             assignment.status = "cancelled"
             db.flush()
             return self._assign_locked(db, member, slot, reservation=assignment)
+
+    def check_replacement(self, db: Session, volunteer_id: int, request_id: int) -> None:
+        """Read-only eligibility after releasing exactly the requested original position."""
+        with db.no_autoflush:
+            request = db.get(ReplacementRequest, request_id)
+            if request is None or request.status != "pending":
+                raise NotFound("pending replacement not found")
+            original = db.get(Assignment, request.assignment_id)
+            if original.status != "replacement_requested" or original.volunteer_id == volunteer_id:
+                raise RosterError(
+                    "replacement must cover a different volunteer's pending assignment"
+                )
+            member = db.get(Volunteer, volunteer_id)
+            slot = db.get(Slot, original.slot_id)
+            if member is None or not member.active:
+                raise NotFound("active volunteer not found")
+            self._validate_assignment(
+                db, member, slot, allow_published=True, releasing_assignment_id=original.id
+            )
 
     def request_third_day(
         self,
@@ -401,6 +425,7 @@ class RosterEngine:
         allow_published: bool = False,
         projected: Sequence[AssignmentIntent] = (),
         require_capacity: bool = True,
+        releasing_assignment_id: int | None = None,
     ) -> None:
         service = db.get(WorshipService, slot.service_id)
         schedule = db.scalar(
@@ -437,7 +462,9 @@ class RosterEngine:
         occupied = (
             db.scalar(
                 select(func.count(Assignment.id)).where(
-                    Assignment.slot_id == slot.id, Assignment.status.in_(OCCUPYING)
+                    Assignment.slot_id == slot.id,
+                    Assignment.status.in_(OCCUPYING),
+                    Assignment.id != releasing_assignment_id if releasing_assignment_id else True,
                 )
             )
             or 0
