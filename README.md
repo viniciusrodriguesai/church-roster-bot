@@ -35,6 +35,8 @@ Para testar convites excepcionais, envie `INICIAR` no terminal do voluntário fi
 
 Use um banco exclusivo de simulação. Os terminais executam o worker com transporte local e templates fictícios, sem chamar a Meta; não execute o worker real nesse mesmo banco. As mensagens são entregues mesmo sem novas entradas no terminal. O simulador não altera o consentimento padrão: cada voluntário precisa enviar `INICIAR` e pode desativar com `PARAR`.
 
+Mantenha os dois terminais abertos e digite somente uma mensagem por vez, sem copiar a transcrição da sessão. Cada linha recebida do bot aparece com `[bot]`; avisos locais usam `[sim]`. O terminal descarta essas linhas, prompts, opções formatadas de menu e blocos com várias linhas antes de gravar eventos. Digite apenas o ID da opção ou o comando, por exemplo `5` ou `ACEITAR 1`. Justificativas continuam sendo texto livre. Para usar uma atualização do simulador, encerre os dois processos com Ctrl+C e abra-os novamente sobre o mesmo banco; não é necessário recriar dados nem reenviar convites já respondidos.
+
 ## PostgreSQL e servidor
 
 Configure a senha local em `.env` e no `DATABASE_URL` antes de usar o Compose. O arquivo `.env.example` contém somente exemplos. Com Docker Desktop ativo:

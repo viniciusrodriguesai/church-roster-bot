@@ -1,6 +1,7 @@
 """Local terminal simulator using the same persisted inbox and conversation router."""
 
 import argparse
+import re
 import threading
 import uuid
 
@@ -68,6 +69,35 @@ def simulate(
 class SimulationClient:
     def send(self, recipient: str, payload: dict) -> str:
         return f"sim-out-{uuid.uuid4().hex}"
+
+
+def terminal_input(line: str) -> str | None:
+    """Accept one user message, never the presentation of a terminal transcript.
+
+    Keep this at the terminal boundary: receive() and Meta still accept free text.
+    Marked output covers new transcripts; legacy patterns cover older simulators,
+    including headers whose accents were corrupted by the Windows console.
+    """
+    text = line.strip()
+    if not text or "\n" in text or "\r" in text:
+        return None
+    if text.startswith(("[bot]", "[sim]", ">")):
+        return None
+    if re.match(r"(?:PS\s+)?[A-Za-z]:[\\/].*>", text):
+        return None
+    if re.match(r"(?:\d+|[SR]\d+|SIM|NAO|ACEITAR \d+|RECUSAR \d+):\s+", text):
+        return None
+    upper = text.upper()
+    if upper in {"ESCALAS DA IGREJA", "DIGITE UMA MENSAGEM. CTRL+C PARA SAIR."} or re.match(
+        r"(?:ADMINISTRA\S*\s+[—�-]\s+|ESCOLHA UMA OP\S*:$|OL[Á�], .*!$)", upper
+    ):
+        return None
+    return text
+
+
+def render_terminal_reply(reply: dict) -> str:
+    # Tag every line so copied output cannot become new input, even line by line.
+    return "\n".join(f"[bot] {line}" for line in render_reply(reply).splitlines())
 
 
 class TerminalInbox:
@@ -142,11 +172,13 @@ def run_terminal(
                     if not worker.send_one():
                         break
                 for reply in inbox.poll():
-                    write("\n" + render_reply(reply))
+                    write("\n" + render_terminal_reply(reply))
                 stopped.wait(interval)
         except Exception as exc:
             errors.append(exc)
-            write(f"\nSimulador interrompido: {type(exc).__name__}. Pressione Enter para sair.")
+            write(
+                f"\n[sim] Simulador interrompido: {type(exc).__name__}. Pressione Enter para sair."
+            )
             stopped.set()
 
     delivery = threading.Thread(target=deliver, daemon=True)
@@ -154,8 +186,8 @@ def run_terminal(
     try:
         # Keep stdin on the main thread so Ctrl+C/EOF can stop the worker cleanly.
         while not stopped.is_set():
-            text = read("> ")
-            if text:
+            text = terminal_input(read("> "))
+            if text is not None:
                 receive(phone, text, factory=factory)
     except EOFError:
         pass
@@ -170,7 +202,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Simulate WhatsApp without sending messages")
     parser.add_argument("--phone", required=True, help="fictional E.164 number")
     args = parser.parse_args()
-    print("Digite uma mensagem. Ctrl+C para sair.")
+    print("[sim] Digite uma mensagem. Ctrl+C para sair. Cole somente uma mensagem por vez.")
     try:
         run_terminal(args.phone)
     except (EOFError, KeyboardInterrupt):

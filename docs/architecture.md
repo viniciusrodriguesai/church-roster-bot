@@ -14,6 +14,8 @@ O simulador escreve o mesmo evento de entrada e usa o mesmo worker e roteador. E
 
 No terminal, uma thread processa e entrega mensagens com transporte local e consulta a caixa recebida enquanto a entrada de texto aguarda no processo principal. Assim, um convite iniciado em outro terminal aparece sem nova entrada. Transações de processamento e reserva de envio usam `BEGIN IMMEDIATE` no SQLite para serializar os terminais locais, enquanto o PostgreSQL mantém os bloqueios de linha existentes.
 
+A fronteira de entrada do terminal filtra transcrições antes de criar eventos: linhas marcadas com `[bot]`/`[sim]`, prompts, opções renderizadas e blocos com várias linhas não são comandos. Cabeçalhos do formato antigo também são reconhecidos, inclusive com acentos corrompidos no console. Toda linha de saída recebe uma marca, inclusive parâmetros de templates. Essa proteção é exclusiva da interface local; o webhook e `receive()` preservam texto livre. A apresentação consulta somente saídas enviadas ao telefone daquele terminal e registra seus IDs em memória, incluindo mensagens antigas que estavam pendentes. Mensagens já enviadas antes da abertura do terminal não são reapresentadas; uma mudança posterior de `sent` para `delivered`/`read` também não repete a apresentação. Nenhum ciclo de consulta cria eventos de entrada.
+
 ## Regras preservadas
 
 - Limite normal de dois **dias distintos** por mês; múltiplas funções compatíveis no mesmo dia contam uma vez.

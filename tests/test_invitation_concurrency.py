@@ -8,8 +8,9 @@ from sqlalchemy import func, select
 
 from church_roster_bot.notifications.invitations import enqueue_invitation
 from church_roster_bot.notifications.worker import Worker, lock_simulation_transaction
-from church_roster_bot.scheduling.models import ThirdDayRequest
-from church_roster_bot.whatsapp.models import OutboundMessage
+from church_roster_bot.scheduling.models import Assignment, ThirdDayRequest
+from church_roster_bot.scripts.simulate import receive
+from church_roster_bot.whatsapp.models import InboundEvent, OutboundMessage
 from tests.test_invitation_delivery import confirm, drain, prepare
 from tests.test_phase2 import FIRST
 
@@ -77,3 +78,47 @@ def test_simultaneous_workers_cannot_send_the_invitation_twice(roster):
             )
             == 1
         )
+
+
+@pytest.mark.parametrize("responses", [1, 2])
+def test_concurrent_acceptance_claims_are_idempotent(roster, responses):
+    _, factory, _ = roster
+    member, slot, config = prepare(roster)
+    invitation_id, _ = confirm(factory, config)
+    client = drain(factory, config)
+    event_ids = [
+        receive(FIRST, f"ACEITAR {invitation_id}", factory=factory) for _ in range(responses)
+    ]
+    barrier = Barrier(2)
+
+    def process_once(_):
+        barrier.wait(timeout=10)
+        return Worker(factory, config, client).process_one()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        assert sum(pool.map(process_once, range(2))) == responses
+    drain(factory, config, client)
+    with factory() as db:
+        for event_id in event_ids:
+            event = db.get(InboundEvent, event_id)
+            assert (event.status, event.attempts) == ("processed", 1)
+        assert db.get(ThirdDayRequest, invitation_id).status == "accepted"
+        assignment = db.scalars(
+            select(Assignment).where(Assignment.exception_id == invitation_id)
+        ).one()
+        assert (assignment.volunteer_id, assignment.slot_id, assignment.status) == (
+            member,
+            slot,
+            "confirmed",
+        )
+        notice = db.scalars(
+            select(OutboundMessage).where(
+                OutboundMessage.dedupe_key == f"invitation:{invitation_id}:aceito"
+            )
+        ).one()
+        assert (notice.status, notice.attempts) == ("sent", 1)
+        receipt = (notice.recipient_e164, notice.payload)
+    assert client.calls.count(receipt) == 1
+    calls = list(client.calls)
+    drain(factory, config, client)
+    assert client.calls == calls
