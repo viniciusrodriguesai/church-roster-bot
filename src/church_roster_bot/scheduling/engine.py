@@ -166,8 +166,10 @@ class RosterEngine:
         *,
         db: Session | None = None,
     ) -> int:
-        if not justification.strip():
-            raise RosterError("a third-day request requires a justification")
+        if not justification.strip() or len(justification.strip()) > 1000:
+            raise RosterError(
+                "a third-day request requires a justification of 1 to 1000 characters"
+            )
         with self._transaction(db) as db:
             member, slot = self._lock_member_slot(db, volunteer_id, slot_id)
             coordinator = db.get(Coordinator, coordinator_id)
@@ -189,6 +191,15 @@ class RosterEngine:
             ):
                 raise NotAuthorized("coordinator does not manage this ministry")
             self._check_eligibility(db, member, slot, service)
+            existing = db.scalar(
+                select(ThirdDayRequest).where(
+                    ThirdDayRequest.volunteer_id == volunteer_id,
+                    ThirdDayRequest.slot_id == slot_id,
+                    ThirdDayRequest.status == "pending",
+                )
+            )
+            if existing:
+                return existing.id
             if self._monthly_days(db, volunteer_id, service.service_date) != 2:
                 raise RosterError("third-day invitation requires exactly two existing days")
             request = ThirdDayRequest(

@@ -10,6 +10,8 @@ Use os comandos da seção de simulação no [README](../README.md). `seed_demo`
 
 `TEST_DATABASE_URL=postgresql+psycopg://...` ativa o teste de concorrência real. **Use banco descartável**, pois o teste cria e remove tabelas. A GitHub Actions provisiona PostgreSQL, executa `alembic upgrade head` e a suíte completa. Sem esse banco, somente o teste de concorrência é ignorado localmente.
 
+O fluxo de convites excepcionais tem testes de transação e envio sem nova mensagem do voluntário, conteúdo e botões, janela de 24 horas, parâmetros de template, ausência de consentimento e `INICIAR`/`PARAR`, falhas HTTP e de rede, interrupção do worker, deduplicação e notificações de aceite/recusa após a sessão expirar. Esses mesmos cenários rodam em SQLite e PostgreSQL quando `TEST_DATABASE_URL` está definido. Um teste do terminal mantém a leitura de texto bloqueada e verifica a chegada automática de um convite iniciado pelo coordenador. Todos os transportes usados nos testes são locais.
+
 ## Pontos ainda não testados externamente
 
 A Meta não foi conectada a um número real. O comportamento em uma conta específica, a aprovação de templates, a entrega fora da simulação, custos e limites da conta exigem teste posterior autorizado. Antes de produção, exercite backup, recuperação, retenção de dados e monitoramento do worker.

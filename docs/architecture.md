@@ -8,7 +8,11 @@ Monólito modular com FastAPI, SQLAlchemy 2, Alembic e PostgreSQL. O módulo `sc
 2. O worker bloqueia um evento pendente com `SELECT ... FOR UPDATE SKIP LOCKED` no PostgreSQL. Roteamento, estado da conversa, regras de escala, auditoria e mensagens de resposta são gravados **na mesma transação**. Se ela falhar, o evento continua pendente.
 3. A caixa `outbound_messages` é enviada separadamente pela Cloud API. IDs da Meta e eventos de entrega são persistidos. Respostas livres são bloqueadas depois de 24 horas da última mensagem do destinatário; templates configurados podem ser usados para convites proativos.
 
+Na confirmação de uma exceção, `notifications.invitations` grava uma saída única vinculada ao convite, dentro da transação da conversa. O worker revalida consentimento e janela, preenche o template aprovado quando necessário e registra a tentativa em uma transação anterior à chamada externa. Falhas definitivas, bloqueios e resultados incertos geram avisos deduplicados ao coordenador. A resposta ACEITAR/RECUSAR também gera aviso na transação da decisão e funciona após a expiração da sessão. Status de transporte nunca criam inscrições. Veja o [contrato dos templates](whatsapp-setup.md#contrato-dos-templates-aprovados).
+
 O simulador escreve o mesmo evento de entrada e usa o mesmo worker e roteador. Ele **não chama a Meta**. Os testes rápidos usam SQLite; a CI usa PostgreSQL para migração e concorrência. Em produção, use somente PostgreSQL.
+
+No terminal, uma thread processa e entrega mensagens com transporte local e consulta a caixa recebida enquanto a entrada de texto aguarda no processo principal. Assim, um convite iniciado em outro terminal aparece sem nova entrada. Transações de processamento e reserva de envio usam `BEGIN IMMEDIATE` no SQLite para serializar os terminais locais, enquanto o PostgreSQL mantém os bloqueios de linha existentes.
 
 ## Regras preservadas
 

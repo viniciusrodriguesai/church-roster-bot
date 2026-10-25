@@ -117,10 +117,29 @@ def list_payload(body: str, options: list[tuple[str, str]], button: str = "Escol
     }
 
 
-def template_payload(name: str, language: str, parameters: list[str] | None = None) -> dict:
+def template_payload(
+    name: str,
+    language: str,
+    parameters: list[str] | None = None,
+    *,
+    quick_replies: list[str] | None = None,
+) -> dict:
     template = {"name": name, "language": {"code": language}}
     if parameters:
         template["components"] = [
-            {"type": "body", "parameters": [{"type": "text", "text": p} for p in parameters]}
+            {
+                "type": "body",
+                "parameters": [{"type": "text", "text": " ".join(p.split())} for p in parameters],
+            }
         ]
+    if quick_replies:
+        template.setdefault("components", []).extend(
+            {
+                "type": "button",
+                "sub_type": "quick_reply",
+                "index": str(index),
+                "parameters": [{"type": "payload", "payload": reply}],
+            }
+            for index, reply in enumerate(quick_replies)
+        )
     return {"type": "template", "template": template}

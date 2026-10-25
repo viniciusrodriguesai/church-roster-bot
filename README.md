@@ -31,6 +31,10 @@ Digite `Oi`, depois os IDs exibidos no menu. O coordenador fictício usa `+15550
 
 SQLite serve apenas para a simulação local rápida; o PostgreSQL é o banco de produção e do teste de concorrência. A CI exercita a migração e os testes no PostgreSQL.
 
+Para testar convites excepcionais, envie `INICIAR` no terminal do voluntário fictício e inscreva-o em dois dias distintos do mês. No terminal do coordenador, escolha `7`, digite `EXCECAO <id_voluntario> <id_vaga>`, informe a justificativa e confirme com `SIM`. O terminal do voluntário mostra o convite automaticamente enquanto aguarda texto. Responda `ACEITAR <id>` ou `RECUSAR <id>`; o coordenador recebe o resultado automaticamente. `7` → `LISTAR` mostra o estado dos envios pendentes, bloqueados ou com falha.
+
+Use um banco exclusivo de simulação. Os terminais executam o worker com transporte local e templates fictícios, sem chamar a Meta; não execute o worker real nesse mesmo banco. As mensagens são entregues mesmo sem novas entradas no terminal. O simulador não altera o consentimento padrão: cada voluntário precisa enviar `INICIAR` e pode desativar com `PARAR`.
+
 ## PostgreSQL e servidor
 
 Configure a senha local em `.env` e no `DATABASE_URL` antes de usar o Compose. O arquivo `.env.example` contém somente exemplos. Com Docker Desktop ativo:

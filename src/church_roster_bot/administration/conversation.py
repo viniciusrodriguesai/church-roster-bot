@@ -23,13 +23,13 @@ from church_roster_bot.conversations.models import ConversationSession
 from church_roster_bot.members.models import Coordinator, Volunteer, VolunteerRole
 from church_roster_bot.members.schemas import VolunteerCreate
 from church_roster_bot.ministries.models import Role
+from church_roster_bot.notifications.invitations import DELIVERY_LABELS, enqueue_invitation
 from church_roster_bot.scheduling.engine import OCCUPYING
 from church_roster_bot.scheduling.errors import RosterError
 from church_roster_bot.scheduling.lifecycle import (
     SCHEDULE_TRANSITIONS,
     audit,
     format_schedule,
-    invitation_text,
     manual_replace,
     publish_schedule,
     schedule_for,
@@ -38,6 +38,7 @@ from church_roster_bot.scheduling.lifecycle import (
 )
 from church_roster_bot.scheduling.models import Assignment, ReplacementRequest, ThirdDayRequest
 from church_roster_bot.services.models import Slot, WorshipService
+from church_roster_bot.whatsapp.models import OutboundMessage
 from church_roster_bot.whatsapp.payloads import buttons_payload, normalize_phone, text_payload
 
 
@@ -464,19 +465,18 @@ class AdminConversationMixin:
                     "third_day_request",
                     request_id,
                 )
-                member = db.get(Volunteer, data["member_id"])
-                if member.invite_opt_in:
-                    self._send(
-                        db,
-                        member.phone_e164,
-                        text_payload(invitation_text(db, db.get(ThirdDayRequest, request_id))),
-                        proactive=True,
-                    )
-                self._text(
-                    db,
-                    phone,
-                    f"Convite #{request_id} registrado. Aceite do voluntário ainda é obrigatório.",
+                already_queued = db.scalar(
+                    select(OutboundMessage.id).where(OutboundMessage.invitation_id == request_id)
                 )
+                outgoing = enqueue_invitation(db, db.get(ThirdDayRequest, request_id), self.config)
+                if already_queued:
+                    self._text(
+                        db,
+                        phone,
+                        f"Convite #{request_id} já registrado: "
+                        f"{DELIVERY_LABELS.get(outgoing.status, outgoing.status)}. "
+                        "Aceite do voluntário ainda é obrigatório.",
+                    )
             else:
                 self._text(db, phone, "Convite descartado.")
             self._state(session, "menu")
@@ -623,6 +623,20 @@ class AdminConversationMixin:
             slot = db.get(Slot, db.get(Assignment, request.assignment_id).slot_id)
             if db.get(WorshipService, slot.service_id).ministry_id == ministry_id:
                 lines.append(f"Substituição #{request.id} — participação #{request.assignment_id}")
+        invitations = db.scalars(
+            select(ThirdDayRequest)
+            .join(Slot, Slot.id == ThirdDayRequest.slot_id)
+            .join(WorshipService, WorshipService.id == Slot.service_id)
+            .where(WorshipService.ministry_id == ministry_id, ThirdDayRequest.status == "pending")
+        ).all()
+        for invitation in invitations:
+            outgoing = db.scalar(
+                select(OutboundMessage).where(OutboundMessage.invitation_id == invitation.id)
+            )
+            delivery = (
+                DELIVERY_LABELS.get(outgoing.status, outgoing.status) if outgoing else "sem envio"
+            )
+            lines.append(f"Convite #{invitation.id}: {delivery}. Aceite ainda obrigatório.")
         return "\n".join(lines) or "Nenhum pedido pendente."
 
     def _general(self, db: Session, session: ConversationSession, text: str, admin) -> None:

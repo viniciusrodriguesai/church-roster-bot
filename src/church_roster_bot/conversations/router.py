@@ -23,6 +23,8 @@ from church_roster_bot.members.models import (
     VolunteerRole,
 )
 from church_roster_bot.ministries.models import Church, Ministry, Role
+from church_roster_bot.notifications.invitations import activate_invitations, notify_coordinator
+from church_roster_bot.notifications.outbox import apply_window
 from church_roster_bot.scheduling.engine import RosterEngine
 from church_roster_bot.scheduling.errors import MonthlyLimit, NoCapacity, RosterError
 from church_roster_bot.scheduling.lifecycle import (
@@ -42,7 +44,6 @@ from church_roster_bot.whatsapp.payloads import (
     IncomingMessage,
     buttons_payload,
     list_payload,
-    template_payload,
     text_payload,
 )
 
@@ -58,28 +59,10 @@ class Bot(AdminConversationMixin):
         self.roster = RosterEngine(session_factory)
 
     def _send(self, db: Session, phone: str, payload: dict, *, proactive: bool = False) -> None:
+        outgoing = OutboundMessage(recipient_e164=phone, payload=payload)
         if proactive:
-            session = db.scalar(
-                select(ConversationSession).where(ConversationSession.phone_e164 == phone)
-            )
-            open_window = session and datetime.now(UTC) - aware(
-                session.last_inbound_at
-            ) < timedelta(hours=24)
-            if not open_window:
-                if not self.config.whatsapp_invite_template:
-                    db.add(
-                        OutboundMessage(
-                            recipient_e164=phone,
-                            payload=payload,
-                            status="blocked_window",
-                            error_code="template_required",
-                        )
-                    )
-                    return
-                payload = template_payload(
-                    self.config.whatsapp_invite_template, self.config.whatsapp_template_language
-                )
-        db.add(OutboundMessage(recipient_e164=phone, payload=payload))
+            apply_window(db, outgoing, self.config)
+        db.add(outgoing)
 
     def _text(self, db: Session, phone: str, body: str) -> None:
         while len(body) > 4096:
@@ -205,9 +188,6 @@ class Bot(AdminConversationMixin):
         admin, coordinator, volunteer = actor_for(db, phone)
         text = message.text.strip()
         upper = text.upper()
-        if expired and upper not in {"OI", "MENU", "CANCELAR", "PARAR", "STOP", "INICIAR", "START"}:
-            self._menu(db, session, admin, coordinator, volunteer)
-            return
         if upper in {"PARAR", "STOP", "SAIR"}:
             if volunteer:
                 volunteer.invite_opt_in = False
@@ -216,6 +196,8 @@ class Bot(AdminConversationMixin):
         if upper in {"INICIAR", "START"}:
             if volunteer:
                 volunteer.invite_opt_in = True
+                db.flush()
+                activate_invitations(db, volunteer.id, self.config)
             self._text(db, phone, "Convites ativados.")
             return
         if upper in {"MENU", "CANCELAR"}:
@@ -237,15 +219,8 @@ class Bot(AdminConversationMixin):
                     else "Convite recusado.",
                 )
                 if invitation:
-                    invite_coordinator = db.get(Coordinator, invitation.coordinator_id)
-                    self._send(
-                        db,
-                        invite_coordinator.phone_e164,
-                        text_payload(
-                            f"Convite excepcional #{request_id}: "
-                            f"{'aceito' if assignment_id else 'recusado'}."
-                        ),
-                        proactive=True,
+                    notify_coordinator(
+                        db, invitation, "aceito" if assignment_id else "recusado", self.config
                     )
                 if assignment_id:
                     slot = db.get(Slot, invitation.slot_id)
@@ -255,6 +230,9 @@ class Bot(AdminConversationMixin):
                         publish_schedule(db, service.ministry_id, service.service_date)
             except (ValueError, RosterError) as exc:
                 self._text(db, phone, f"Convite não aplicado: {exc}")
+            return
+        if expired and upper not in {"OI", "CONVITES", "FUNCOES"}:
+            self._menu(db, session, admin, coordinator, volunteer)
             return
         if upper == "FUNCOES" and volunteer:
             roles = db.scalars(

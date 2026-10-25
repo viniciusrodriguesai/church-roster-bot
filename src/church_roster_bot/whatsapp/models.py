@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, DateTime, String, UniqueConstraint
+from sqlalchemy import JSON, DateTime, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from church_roster_bot.core.database import Base
@@ -26,6 +26,10 @@ class OutboundMessage(Base):
     __tablename__ = "outbound_messages"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    invitation_id: Mapped[int | None] = mapped_column(
+        ForeignKey("third_day_requests.id"), unique=True
+    )
+    dedupe_key: Mapped[str | None] = mapped_column(String(128), unique=True)
     recipient_e164: Mapped[str] = mapped_column(String(16), nullable=False)
     payload: Mapped[dict] = mapped_column(JSON, nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
