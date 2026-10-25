@@ -1,8 +1,18 @@
 # Fase 3: arquitetura e entrega incremental
 
-Status: arquitetura definida; implementação em incrementos na branch
+Status: arquitetura e validação consultiva do motor entregues; implementação em incrementos na branch
 `feature/phase-3-automation`. A Fase 2 permanece compatível. Este documento
 distingue decisões de arquitetura de funcionalidades já entregues.
+
+## Incrementos entregues
+
+- Contrato de arquitetura e baseline da Fase 2 integrada.
+- `RosterEngine.check_assignment`: consulta as mesmas regras usadas por `assign`
+  e considera uma sequência de `AssignmentIntent` apenas em memória. Não cria
+  inscrições, não faz reservas e não envia mensagens. Projeções consomem
+  capacidade, dias mensais e compatibilidade de funções para o cálculo. A
+  inscrição real continua bloqueando e revalidando os dados atuais. Não há
+  migração nem mudança no fluxo de exceção existente neste incremento.
 
 ## Decisão: proposta, aprovação e confirmação são operações distintas
 

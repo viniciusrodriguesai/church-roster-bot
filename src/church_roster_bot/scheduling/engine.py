@@ -1,4 +1,4 @@
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
@@ -40,6 +40,14 @@ class CapacityReport:
     normal_day_capacity: int
     shortage_at_least: int
     warnings: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class AssignmentIntent:
+    """An advisory choice; never a reservation or permission to write an assignment."""
+
+    volunteer_id: int
+    slot_id: int
 
 
 def month_bounds(day: date) -> tuple[date, date]:
@@ -145,6 +153,28 @@ class RosterEngine:
         with self._transaction(db) as db:
             member, slot = self._lock_member_slot(db, volunteer_id, slot_id)
             return self._assign_locked(db, member, slot)
+
+    def check_assignment(
+        self,
+        db: Session,
+        volunteer_id: int,
+        slot_id: int,
+        *,
+        projected: Sequence[AssignmentIntent] = (),
+    ) -> None:
+        """Read-only advisory validation; assign() must still lock and revalidate.
+
+        Projected choices count toward capacity, conflicts and monthly days but
+        never enter the session or the database. This cannot authorize a third day.
+        """
+        with db.no_autoflush:
+            member = db.get(Volunteer, volunteer_id)
+            if member is None or not member.active:
+                raise NotFound("active volunteer not found")
+            slot = db.get(Slot, slot_id)
+            if slot is None:
+                raise NotFound("slot not found")
+            self._validate_assignment(db, member, slot, projected=projected)
 
     def confirm_reservation(self, assignment_id: int, *, db: Session | None = None) -> int:
         with self._transaction(db) as db:
@@ -341,6 +371,27 @@ class RosterEngine:
         allow_published: bool = False,
         reservation: Assignment | None = None,
     ) -> int:
+        self._validate_assignment(
+            db, member, slot, allow_third=allow_third, allow_published=allow_published
+        )
+        assignment = reservation or Assignment(
+            slot_id=slot.id, volunteer_id=member.id, exception_id=request_id
+        )
+        assignment.status = "confirmed"
+        db.add(assignment)
+        db.flush()
+        return assignment.id
+
+    def _validate_assignment(
+        self,
+        db: Session,
+        member: Volunteer,
+        slot: Slot,
+        *,
+        allow_third: bool = False,
+        allow_published: bool = False,
+        projected: Sequence[AssignmentIntent] = (),
+    ) -> None:
         service = db.get(WorshipService, slot.service_id)
         schedule = db.scalar(
             select(MonthlySchedule).where(
@@ -352,7 +403,27 @@ class RosterEngine:
         allowed_states = {"open", "published"} if allow_published or allow_third else {"open"}
         if schedule is not None and schedule.state not in allowed_states:
             raise RosterError("schedule does not accept this operation")
-        self._check_eligibility(db, member, slot, service)
+        projected_slots = (
+            {
+                s.id: (s, worship)
+                for s, worship in db.execute(
+                    select(Slot, WorshipService)
+                    .join(WorshipService, WorshipService.id == Slot.service_id)
+                    .where(Slot.id.in_({intent.slot_id for intent in projected}))
+                )
+            }
+            if projected
+            else {}
+        )
+        if len(projected_slots) != len({intent.slot_id for intent in projected}):
+            raise NotFound("projected slot not found")
+        projected_roles = [
+            projected_slots[intent.slot_id][0].role_id
+            for intent in projected
+            if intent.volunteer_id == member.id
+            and projected_slots[intent.slot_id][1].id == service.id
+        ]
+        self._check_eligibility(db, member, slot, service, projected_roles=projected_roles)
         occupied = (
             db.scalar(
                 select(func.count(Assignment.id)).where(
@@ -361,6 +432,7 @@ class RosterEngine:
             )
             or 0
         )
+        occupied += sum(intent.slot_id == slot.id for intent in projected)
         if occupied >= slot.capacity:
             raise NoCapacity("slot is full")
         days = self._monthly_days(db, member.id, service.service_date)
@@ -377,18 +449,40 @@ class RosterEngine:
                 .limit(1)
             )
         )
+        if projected:
+            start, end = month_bounds(service.service_date)
+            existing_dates = set(
+                db.scalars(
+                    select(WorshipService.service_date)
+                    .join(Slot, Slot.service_id == WorshipService.id)
+                    .join(Assignment, Assignment.slot_id == Slot.id)
+                    .where(
+                        Assignment.volunteer_id == member.id,
+                        Assignment.status.in_(COUNTED_DAYS),
+                        WorshipService.service_date >= start,
+                        WorshipService.service_date < end,
+                    )
+                )
+            )
+            existing_dates.update(
+                projected_slots[intent.slot_id][1].service_date
+                for intent in projected
+                if intent.volunteer_id == member.id
+                and start <= projected_slots[intent.slot_id][1].service_date < end
+            )
+            days = len(existing_dates)
+            already_on_day = service.service_date in existing_dates
         if not already_on_day and days >= (3 if allow_third else 2):
             raise MonthlyLimit("monthly day limit reached")
-        assignment = reservation or Assignment(
-            slot_id=slot.id, volunteer_id=member.id, exception_id=request_id
-        )
-        assignment.status = "confirmed"
-        db.add(assignment)
-        db.flush()
-        return assignment.id
 
     def _check_eligibility(
-        self, db: Session, member: Volunteer, slot: Slot, service: WorshipService
+        self,
+        db: Session,
+        member: Volunteer,
+        slot: Slot,
+        service: WorshipService,
+        *,
+        projected_roles: Sequence[int] = (),
     ) -> None:
         ministry = db.get(Ministry, service.ministry_id)
         if ministry.church_id != member.church_id:
@@ -425,7 +519,7 @@ class RosterEngine:
                 Assignment.status.in_(COUNTED_DAYS),
             )
         ).all()
-        role_ids = [role_id for _, role_id in existing]
+        role_ids = [role_id for _, role_id in existing] + list(projected_roles)
         if slot.role_id in role_ids:
             raise RosterError("volunteer is already assigned to this slot")
         if (
