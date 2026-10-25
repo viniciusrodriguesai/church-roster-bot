@@ -39,6 +39,12 @@ from church_roster_bot.scheduling.lifecycle import (
     transition_schedule,
 )
 from church_roster_bot.scheduling.models import Assignment, ReplacementRequest, ThirdDayRequest
+from church_roster_bot.scheduling.proposals import (
+    cancel_proposal,
+    create_proposal,
+    proposal_snapshot,
+    require_proposal,
+)
 from church_roster_bot.services.models import Slot, WorshipService
 from church_roster_bot.whatsapp.models import OutboundMessage
 from church_roster_bot.whatsapp.payloads import buttons_payload, normalize_phone, text_payload
@@ -104,10 +110,53 @@ class AdminConversationMixin:
                     actor_id=actor_id,
                 )
                 self._text(db, phone, format_proposal(db, proposal))
+            elif upper.startswith("PLANEJAR "):
+                proposal_id = create_proposal(
+                    db,
+                    self.roster,
+                    ministry.id,
+                    parse_month(text.split(" ", 1)[1]),
+                    actor_type=actor_type,
+                    actor_id=actor_id,
+                )
+                self._text(
+                    db,
+                    phone,
+                    f"Proposta #{proposal_id} salva como rascunho. "
+                    f"Envie VERPROPOSTA {proposal_id} para revisar ou DESCARTAR {proposal_id}. "
+                    "Nenhuma inscrição ou convite foi criado.",
+                )
+            elif upper.startswith(("VERPROPOSTA ", "DESCARTAR ")):
+                proposal_id = int(text.split()[1])
+                proposal = require_proposal(db, proposal_id, ministry.id, actor_type, actor_id)
+                if upper.startswith("VERPROPOSTA "):
+                    self._text(
+                        db,
+                        phone,
+                        f"Proposta #{proposal.id}: {proposal.status}.\n"
+                        + format_proposal(db, proposal_snapshot(db, proposal)),
+                    )
+                else:
+                    self._state(session, "admin_cancel_proposal_confirm", proposal_id=proposal_id)
+                    self._send(
+                        db,
+                        phone,
+                        buttons_payload(
+                            f"Descartar proposta #{proposal_id}?",
+                            [("SIM", "Descartar"), ("NAO", "Manter")],
+                        ),
+                    )
             else:
                 self._menu(db, session, None, coordinator, None)
             return
-        if state == "admin_members":
+        if state == "admin_cancel_proposal_confirm":
+            if upper == "SIM":
+                cancel_proposal(db, data["proposal_id"], ministry.id, actor_type, actor_id)
+                self._text(db, phone, "Proposta descartada; histórico preservado.")
+            else:
+                self._text(db, phone, "Proposta mantida.")
+            self._state(session, "menu")
+        elif state == "admin_members":
             if upper == "LISTAR":
                 self._text(db, phone, self._members(db, ministry.id))
             elif upper == "NOVO":

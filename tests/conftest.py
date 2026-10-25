@@ -1,8 +1,10 @@
 import os
 from datetime import time
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine, select
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -79,3 +81,30 @@ def make_service(engine: RosterEngine, factory, ministry_id, day, capacities):
             for slot in db.scalars(select(Slot).where(Slot.service_id == service_id))
         }
     return service_id, slots
+
+
+@pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)])
+def migration_url(request, tmp_path):
+    """Each PostgreSQL migration round trip owns a separate disposable schema."""
+    if request.param == "sqlite":
+        yield f"sqlite+pysqlite:///{tmp_path / 'migration.sqlite3'}"
+        return
+    url = os.getenv("TEST_DATABASE_URL")
+    if not url:
+        pytest.skip("set TEST_DATABASE_URL to a disposable PostgreSQL database")
+    if not url.startswith("postgresql"):
+        pytest.fail("TEST_DATABASE_URL must point to PostgreSQL")
+    schema = f"migration_{uuid4().hex}"
+    engine = create_engine(url)
+    with engine.begin() as db:
+        db.exec_driver_sql(f'CREATE SCHEMA "{schema}"')
+    try:
+        yield (
+            make_url(url)
+            .update_query_dict({"options": f"-csearch_path={schema}"})
+            .render_as_string(hide_password=False)
+        )
+    finally:
+        with engine.begin() as db:
+            db.exec_driver_sql(f'DROP SCHEMA "{schema}" CASCADE')
+        engine.dispose()

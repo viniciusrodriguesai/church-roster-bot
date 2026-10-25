@@ -20,6 +20,12 @@ no fuso da igreja entram no cálculo. Repetir o comando calcula uma nova prévia
 com o estado atual; não cria reservas, inscrições ou convites. Aprovação
 persistente e convites de distribuição ainda estão pendentes.
 
+`PLANEJAR AAAA-MM` salva o cálculo como um rascunho com ID. `VERPROPOSTA <id>`
+mostra as escolhas e os motivos originais; `DESCARTAR <id>` pede `SIM` antes de
+cancelar, mantendo o histórico. Os comandos exigem autorização atual para o
+ministério selecionado. Salvar e revisar rascunhos ainda não envia convites nem
+atribui participações. A aprovação com convites será um incremento separado.
+
 ## Administrador geral
 
 Para editar data ou horário de um culto, entre em Configurar cultos e envie `EDITAR <culto_id>`, seguido por `DATA AAAA-MM-DD` ou `HORA HH:MM`. A confirmação só é aplicada se o culto não tiver participações ativas nem estiver publicado ou encerrado; isso evita mover compromissos já assumidos.

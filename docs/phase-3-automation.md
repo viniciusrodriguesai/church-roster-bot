@@ -1,6 +1,6 @@
 # Fase 3: arquitetura e entrega incremental
 
-Status: arquitetura, validação consultiva e prévia de distribuição entregues; incrementos na branch
+Status: arquitetura, prévia e revisão persistente entregues; incrementos na branch
 `feature/phase-3-automation`. A Fase 2 permanece compatível. Este documento
 distingue decisões de arquitetura de funcionalidades já entregues.
 
@@ -23,6 +23,13 @@ distingue decisões de arquitetura de funcionalidades já entregues.
   e as explicações. Repetir o comando recalcula o estado atual; não reserva vagas
   nem habilita aprovação neste incremento. Aprovação persistente e aceite por
   convite continuam pendentes. Consultas de prévia não exigem migração.
+- `PLANEJAR AAAA-MM` salva um rascunho identificado com a versão da política,
+  a ordem das sugestões, pontuações e falta de cobertura. `VERPROPOSTA <id>`
+  recupera o resultado original sem recalcular as escolhas; `DESCARTAR <id>`
+  pede confirmação e preserva os itens e a auditoria. A autorização atual é
+  reavaliada a cada operação e limitada ao ministério selecionado. Cancelamentos
+  repetidos ou concorrentes gravam uma única decisão. Nenhuma inscrição ou
+  convite é criado por esses comandos.
 
 ## Decisão: proposta, aprovação e confirmação são operações distintas
 
@@ -150,3 +157,14 @@ e compatibilidade projetadas em memória. Cada sugestão selecionada passa de no
 pelo motor compartilhado com todas as projeções anteriores. Um teste limita o
 número de consultas em um mês sintético para evitar a regressão de recomputar
 toda a matriz SQL após cada escolha.
+
+## Migração de propostas
+
+`b31a0c4e6721` acrescenta `roster_proposals` e `roster_proposal_items` sem alterar
+as tabelas de participações ou mensagens. Os testes executam upgrade, downgrade,
+novo upgrade e comparação de metadados em SQLite temporário e em um schema
+PostgreSQL descartável exclusivo de cada teste. Dados legados da outbox são
+verificados antes e depois. O downgrade remove somente as novas tabelas de
+propostas; rascunhos da Fase 3 devem ser exportados antes de um downgrade caso
+precisem ser conservados. Os bancos locais existentes não são migrados pelo
+desenvolvimento.

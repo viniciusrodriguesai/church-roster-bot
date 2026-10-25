@@ -15,6 +15,8 @@ from church_roster_bot.scheduling.models import (
     Assignment,
     MonthlySchedule,
     ReplacementRequest,
+    RosterProposal,
+    RosterProposalItem,
     ThirdDayRequest,
 )
 from church_roster_bot.services.models import Slot, WorshipService
@@ -33,6 +35,8 @@ __all__ = [
     "MonthlySchedule",
     "OutboundMessage",
     "ReplacementRequest",
+    "RosterProposal",
+    "RosterProposalItem",
     "Role",
     "RoleConflict",
     "ScheduleVersion",

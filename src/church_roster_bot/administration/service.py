@@ -59,6 +59,26 @@ def require_ministry(
     raise NotAuthorized("ministry is not authorized for this coordinator")
 
 
+def authorize_actor(db: Session, ministry_id: int, actor_type: str, actor_id: int) -> Ministry:
+    """Resolve current credentials for a persisted command, never a cached grant."""
+    actor_class = {"admin": GeneralAdmin, "coordinator": Coordinator}.get(actor_type)
+    if actor_class is None:
+        raise NotAuthorized("only administrators and coordinators may manage proposals")
+    actor = db.scalar(
+        select(actor_class)
+        .where(actor_class.id == actor_id, actor_class.active.is_(True))
+        .execution_options(populate_existing=True)
+    )
+    if actor is None:
+        raise NotAuthorized("active actor not found")
+    return require_ministry(
+        db,
+        ministry_id,
+        actor if actor_type == "admin" else None,
+        actor if actor_type == "coordinator" else None,
+    )
+
+
 def edit_volunteer(
     db: Session,
     volunteer_id: int,

@@ -10,8 +10,8 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from church_roster_bot.administration.service import require_ministry
-from church_roster_bot.members.models import Coordinator, GeneralAdmin, Volunteer, VolunteerRole
+from church_roster_bot.administration.service import authorize_actor
+from church_roster_bot.members.models import Volunteer, VolunteerRole
 from church_roster_bot.ministries.models import Church, Role, RoleConflict
 from church_roster_bot.scheduling.engine import (
     OCCUPYING,
@@ -19,7 +19,7 @@ from church_roster_bot.scheduling.engine import (
     RosterEngine,
     month_bounds,
 )
-from church_roster_bot.scheduling.errors import NotAuthorized, RosterError
+from church_roster_bot.scheduling.errors import RosterError
 from church_roster_bot.scheduling.lifecycle import schedule_for
 from church_roster_bot.scheduling.models import Assignment
 from church_roster_bot.services.models import Slot, WorshipService
@@ -114,20 +114,7 @@ class DistributionPlanner:
         actor_id: int,
         instant: datetime,
     ) -> DistributionProposal:
-        actor_class = {"admin": GeneralAdmin, "coordinator": Coordinator}.get(actor_type)
-        if actor_class is None:
-            raise NotAuthorized("only administrators and coordinators may propose rosters")
-        actor = db.scalar(
-            select(actor_class).where(actor_class.id == actor_id, actor_class.active.is_(True))
-        )
-        if actor is None:
-            raise NotAuthorized("active actor not found")
-        ministry = require_ministry(
-            db,
-            ministry_id,
-            actor if actor_type == "admin" else None,
-            actor if actor_type == "coordinator" else None,
-        )
+        ministry = authorize_actor(db, ministry_id, actor_type, actor_id)
         start, end = month_bounds(month)
         schedule = schedule_for(db, ministry_id, start)
         if schedule is None or schedule.state != "open":

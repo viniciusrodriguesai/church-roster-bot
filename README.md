@@ -11,6 +11,7 @@ Bot open source para escalas de voluntários pelo WhatsApp. **Estado: Fase 2 imp
 - Webhook Meta com verificação, assinatura HMAC, eventos persistentes e deduplicados; worker separado; caixa de saída com status de entrega; cliente oficial Graph API para texto, listas, botões e templates.
 - Simulador de terminal com oito voluntários fictícios e PostgreSQL ou SQLite local.
 - Prévia de distribuição equilibrada: no menu do coordenador, `PROPOR AAAA-MM` mostra sugestões explicáveis e posições sem cobertura, considerando carga mensal, histórico, permissões e indisponibilidade. O cálculo não cria inscrições, reservas ou convites.
+- Rascunhos auditáveis: `PLANEJAR AAAA-MM` salva a proposta; `VERPROPOSTA <id>` recupera as escolhas originais e `DESCARTAR <id>` cancela após confirmação, com acesso restrito ao ministério autorizado. A migração incremental é `b31a0c4e6721`.
 
 **Fase 3 em desenvolvimento incremental:** o planejador e a prévia explicável estão disponíveis. Aprovação persistente e convites da distribuição, lista de espera, busca automática de substitutos, lembretes e relatórios avançados ainda serão entregues em incrementos independentes. A [arquitetura da automação](docs/phase-3-automation.md) separa propostas, aprovação do coordenador e aceite do voluntário. O número oficial, os templates aprovados e a implantação contínua precisam de configuração externa. Veja [Arquitetura](docs/architecture.md) e [Fluxos](docs/conversation-flows.md).
 

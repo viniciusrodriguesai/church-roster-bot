@@ -1,6 +1,16 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, text
+from sqlalchemy import (
+    JSON,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from church_roster_bot.core.database import Base
@@ -97,3 +107,39 @@ class ReplacementRequest(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
+
+
+class RosterProposal(Base):
+    __tablename__ = "roster_proposals"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('draft', 'approved', 'cancelled')", name="valid_proposal_status"
+        ),
+        CheckConstraint("created_by_type IN ('admin', 'coordinator')", name="valid_proposal_actor"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ministry_id: Mapped[int] = mapped_column(ForeignKey("ministries.id"), nullable=False)
+    month: Mapped[date] = mapped_column(Date, nullable=False)
+    policy_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="draft")
+    created_by_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    created_by_id: Mapped[int] = mapped_column(nullable=False)
+    unfilled: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class RosterProposalItem(Base):
+    __tablename__ = "roster_proposal_items"
+    __table_args__ = (
+        UniqueConstraint("proposal_id", "position"),
+        UniqueConstraint("proposal_id", "slot_id", "volunteer_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    proposal_id: Mapped[int] = mapped_column(ForeignKey("roster_proposals.id"), nullable=False)
+    position: Mapped[int] = mapped_column(nullable=False)
+    slot_id: Mapped[int] = mapped_column(ForeignKey("slots.id"), nullable=False)
+    volunteer_id: Mapped[int] = mapped_column(ForeignKey("volunteers.id"), nullable=False)
+    score: Mapped[dict] = mapped_column(JSON, nullable=False)
