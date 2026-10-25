@@ -1,4 +1,9 @@
-# Arquitetura — Fase 2
+# Arquitetura
+
+A Fase 2 está integrada. A Fase 3 começa pelo contrato de distribuição inteligente,
+separando planejamento, aprovação e confirmação; veja
+[Arquitetura e incrementos da automação](phase-3-automation.md). As decisões ali
+descritas não significam que os módulos futuros já estejam implementados.
 
 Monólito modular com FastAPI, SQLAlchemy 2, Alembic e PostgreSQL. O módulo `scheduling.engine` permanece como fonte das regras de inscrição. `scheduling.lifecycle` define transições, substituições manuais e versões. `administration` aplica o escopo do coordenador. `conversations` mantém as etapas no banco. `whatsapp` contém o webhook, parser e cliente Graph API. `notifications.worker` consome eventos e envia a caixa de saída. `audit` registra mudanças sem copiar números ou tokens para os detalhes.
 

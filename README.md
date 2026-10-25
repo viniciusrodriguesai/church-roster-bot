@@ -11,7 +11,7 @@ Bot open source para escalas de voluntários pelo WhatsApp. **Estado: Fase 2 imp
 - Webhook Meta com verificação, assinatura HMAC, eventos persistentes e deduplicados; worker separado; caixa de saída com status de entrega; cliente oficial Graph API para texto, listas, botões e templates.
 - Simulador de terminal com oito voluntários fictícios e PostgreSQL ou SQLite local.
 
-**Pendente da Fase 3:** distribuição automática, lista de espera, busca automática de substitutos, lembretes e relatórios avançados. O número oficial, os templates aprovados e a implantação contínua precisam de configuração externa. Veja [Arquitetura](docs/architecture.md) e [Fluxos](docs/conversation-flows.md).
+**Fase 3 em desenvolvimento incremental:** a [arquitetura da automação](docs/phase-3-automation.md) define a separação entre propostas explicáveis, aprovação do coordenador e aceite do voluntário. Distribuição automática, lista de espera, busca automática de substitutos, lembretes e relatórios avançados ainda serão entregues em incrementos independentes. O número oficial, os templates aprovados e a implantação contínua precisam de configuração externa. Veja [Arquitetura](docs/architecture.md) e [Fluxos](docs/conversation-flows.md).
 
 ## Testar sem número da Meta e sem Docker
 
