@@ -20,6 +20,7 @@ from church_roster_bot.scheduling.models import (
     RosterProposal,
     RosterProposalItem,
     ThirdDayRequest,
+    WaitlistEntry,
 )
 from church_roster_bot.services.models import Slot, WorshipService
 from church_roster_bot.whatsapp.models import InboundEvent, OutboundMessage
@@ -46,6 +47,7 @@ __all__ = [
     "ScheduleVersion",
     "Slot",
     "ThirdDayRequest",
+    "WaitlistEntry",
     "Unavailability",
     "Volunteer",
     "VolunteerRole",

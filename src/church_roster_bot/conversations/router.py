@@ -38,8 +38,10 @@ from church_roster_bot.scheduling.models import (
     Assignment,
     MonthlySchedule,
     ThirdDayRequest,
+    WaitlistEntry,
 )
 from church_roster_bot.scheduling.offers import respond_offer
+from church_roster_bot.scheduling.waitlist import cancel_waitlist, join_waitlist
 from church_roster_bot.services.models import Slot, WorshipService
 from church_roster_bot.whatsapp.models import OutboundMessage
 from church_roster_bot.whatsapp.payloads import (
@@ -257,7 +259,11 @@ class Bot(AdminConversationMixin):
             except (ValueError, RosterError) as exc:
                 self._text(db, phone, f"Convite não aplicado: {exc}")
             return
-        if expired and upper not in {"OI", "CONVITES", "FUNCOES"}:
+        if (
+            expired
+            and upper not in {"OI", "CONVITES", "FUNCOES", "MINHAESPERA"}
+            and not upper.startswith(("ESPERA ", "SAIR_ESPERA "))
+        ):
             self._menu(db, session, admin, coordinator, volunteer)
             return
         if upper == "FUNCOES" and volunteer:
@@ -280,6 +286,41 @@ class Bot(AdminConversationMixin):
                 phone,
                 "\n\n".join(invitation_text(db, invitation) for invitation in invitations)
                 or "Nenhum convite pendente.",
+            )
+            return
+        if volunteer and upper.startswith(("ESPERA ", "SAIR_ESPERA ")):
+            try:
+                parts = upper.split()
+                if len(parts) != 2 or not parts[1].isdigit():
+                    raise RosterError("use ESPERA <vaga_id> ou SAIR_ESPERA <posição_id>")
+                if parts[0] == "ESPERA":
+                    entry_id = join_waitlist(db, self.roster, volunteer.id, int(parts[1]))
+                    self._text(
+                        db,
+                        phone,
+                        f"Lista de espera #{entry_id} registrada. "
+                        "Prioridade por ordem de entrada entre elegíveis. "
+                        "Envie INICIAR para permitir os convites; o aceite será obrigatório.",
+                    )
+                else:
+                    cancel_waitlist(db, self.roster, volunteer.id, int(parts[1]), self.config)
+                    self._text(db, phone, "Saída da lista de espera registrada.")
+            except (ValueError, RosterError) as exc:
+                self._text(db, phone, f"Lista de espera não aplicada: {exc}")
+            return
+        if volunteer and upper == "MINHAESPERA":
+            entries = db.scalars(
+                select(WaitlistEntry)
+                .where(WaitlistEntry.volunteer_id == volunteer.id)
+                .order_by(WaitlistEntry.created_at, WaitlistEntry.id)
+            ).all()
+            self._text(
+                db,
+                phone,
+                "\n".join(
+                    f"#{entry.id}: vaga #{entry.slot_id}, {entry.status}" for entry in entries
+                )
+                or "Nenhuma posição na lista de espera.",
             )
             return
         if upper == "ADMIN" and admin:

@@ -30,6 +30,12 @@ recebidas. `notifications.coordinators` centraliza os avisos deduplicados e seu
 escopo de igreja/ministério. A política começa desabilitada; a configuração
 exige confirmação de um coordenador ou administrador autorizado.
 
+`scheduling.waitlist` mantém as posições FIFO e oferece capacidade pela mesma
+outbox de convites normais. Cada posição ativa é única por voluntário/vaga;
+aceite, recusa e expiração atualizam a fila na transação da decisão. A manutenção
+executa expiração, abertura e seleção em transações separadas para preservar a
+ordem de bloqueios. A fila não substitui a validação de capacidade no aceite.
+
 O simulador escreve o mesmo evento de entrada e usa o mesmo worker e roteador. Ele **não chama a Meta**. Os testes rápidos usam SQLite; a CI usa PostgreSQL para migração e concorrência. Em produção, use somente PostgreSQL.
 
 No terminal, uma thread processa e entrega mensagens com transporte local e consulta a caixa recebida enquanto a entrada de texto aguarda no processo principal. Assim, um convite iniciado em outro terminal aparece sem nova entrada. Transações de processamento e reserva de envio usam `BEGIN IMMEDIATE` no SQLite para serializar os terminais locais, enquanto o PostgreSQL mantém os bloqueios de linha existentes.
@@ -65,5 +71,5 @@ O número recebido de um webhook assinado é procurado no cadastro. Voluntários
 - Uma perda de rede após a Meta aceitar um envio tem resultado ambíguo. O worker marca `unknown` e não repete automaticamente para evitar mensagem duplicada. HTTP 429 tem até três tentativas. Monitore e resolva `failed`, `unknown` e `blocked_window`.
 - Rode uma instância do worker nesta fase. Eventos de status que chegarem antes do registro do ID de saída podem exigir reconciliação manual.
 - Um template aprovado e consentimento são necessários para convites fora da janela de 24 horas; sem isso, o convite continua registrado, mas a notificação fica bloqueada.
-- Não há busca automática de substitutos, lista de espera, lembretes, emergência ou relatórios avançados; são trabalhos da Fase 3.
+- Busca automática de substitutos, lembretes, emergência e relatórios avançados permanecem nos próximos incrementos da Fase 3.
 - Configure retenção/eliminação de eventos com dados pessoais, backup PostgreSQL e monitoramento antes do uso real. Não existe rotina automática de limpeza nesta fase.

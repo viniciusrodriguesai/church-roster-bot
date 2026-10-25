@@ -1,7 +1,7 @@
 """Approve proposals as invitations; only an explicit, eligible acceptance assigns."""
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -12,15 +12,19 @@ from church_roster_bot.core.time import database_utc, utc_now
 from church_roster_bot.members.models import Volunteer
 from church_roster_bot.ministries.models import Ministry
 from church_roster_bot.notifications.automation import (
-    enqueue_offer,
     notify_offer,
     service_fingerprint,
     service_start,
 )
 from church_roster_bot.scheduling.engine import AssignmentIntent, RosterEngine
 from church_roster_bot.scheduling.errors import NotAuthorized, RosterError
+from church_roster_bot.scheduling.invitations import create_invitation
 from church_roster_bot.scheduling.lifecycle import audit, publish_schedule, schedule_for
-from church_roster_bot.scheduling.models import AutomationInvitation, RosterProposalItem
+from church_roster_bot.scheduling.models import (
+    AutomationInvitation,
+    RosterProposalItem,
+    WaitlistEntry,
+)
 from church_roster_bot.scheduling.proposals import proposal_snapshot, require_proposal
 from church_roster_bot.services.models import Slot, WorshipService
 
@@ -96,22 +100,17 @@ def approve_proposal(
                 )
             ):
                 raise RosterError("a pending invitation already exists; review the proposal")
-            offer = AutomationInvitation(
+            offer = create_invitation(
+                db,
+                config,
                 kind="distribution",
                 source_key=f"distribution:{item.id}",
                 proposal_item_id=item.id,
                 volunteer_id=item.volunteer_id,
                 slot_id=item.slot_id,
                 reason=suggestion.score.explanation,
-                created_at=instant,
-                service_fingerprint=service_fingerprint(db, slot),
-                expires_at=min(
-                    start, instant + timedelta(hours=config.automation_invite_ttl_hours)
-                ),
+                now=instant,
             )
-            db.add(offer)
-            db.flush()
-            enqueue_offer(db, offer, config)
             offers.append(offer.id)
             projected.append(suggestion.intent)
         proposal.status, proposal.decided_at = "approved", instant
@@ -178,6 +177,7 @@ def respond_offer(
                 if schedule and schedule.state == "published":
                     publish_schedule(db, service.ministry_id, service.service_date)
         offer.responded_at = instant
+        _update_waitlist(db, offer, instant)
         notify_offer(db, offer, offer.status, config)
         ministry = db.get(Ministry, service.ministry_id)
         audit(
@@ -204,6 +204,7 @@ def expire_offers(db: Session, config: Settings, *, now: datetime | None = None)
     ).all()
     for offer in offers:
         offer.status, offer.responded_at = "expired", instant
+        _update_waitlist(db, offer, instant)
         notify_offer(db, offer, "expired", config)
         slot = db.get(Slot, offer.slot_id)
         service = db.get(WorshipService, slot.service_id)
@@ -218,3 +219,13 @@ def expire_offers(db: Session, config: Settings, *, now: datetime | None = None)
             offer.id,
         )
     return len(offers)
+
+
+def _update_waitlist(db: Session, offer: AutomationInvitation, instant: datetime) -> None:
+    if offer.kind != "waitlist":
+        return
+    entry = db.scalar(
+        select(WaitlistEntry).where(WaitlistEntry.offer_id == offer.id).with_for_update()
+    )
+    if entry and entry.status == "offered":
+        entry.status, entry.responded_at = offer.status, instant

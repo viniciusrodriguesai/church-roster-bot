@@ -15,6 +15,7 @@ from church_roster_bot.notifications.outbox import apply_window
 from church_roster_bot.scheduling.automation import open_monthly_schedules
 from church_roster_bot.scheduling.models import AutomationInvitation, ThirdDayRequest
 from church_roster_bot.scheduling.offers import expire_offers
+from church_roster_bot.scheduling.waitlist import dispatch_waitlist
 from church_roster_bot.whatsapp.client import MetaSendError, WhatsAppClient
 from church_roster_bot.whatsapp.models import InboundEvent, OutboundMessage
 from church_roster_bot.whatsapp.payloads import parse_message
@@ -224,16 +225,23 @@ class Worker:
     def maintain(self) -> bool:
         if time.monotonic() < self._maintenance_after:
             return False
+        progressed = False
         try:
-            with self.session_factory.begin() as db:
-                lock_simulation_transaction(db)
-                expired = expire_offers(db, self.config)
-                opened = open_monthly_schedules(db, self.config)
+            # Each phase commits before the next lock order starts. Expiry holds
+            # offer locks; allocation always locks members, then slots, then offers.
+            for operation in (
+                lambda db: expire_offers(db, self.config),
+                lambda db: open_monthly_schedules(db, self.config),
+                lambda db: dispatch_waitlist(db, self.bot.roster, self.config),
+            ):
+                with self.session_factory.begin() as db:
+                    lock_simulation_transaction(db)
+                    progressed = bool(operation(db)) or progressed
             self._maintenance_after = time.monotonic() + 1
-            return bool(expired or opened)
+            return progressed
         except Exception as exc:
             if is_sqlite_busy(exc):
-                return False
+                return progressed
             raise
 
 

@@ -199,3 +199,33 @@ class AutomationPolicy(Base):
         Time(timezone=False), nullable=False, default=time(9)
     )
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class WaitlistEntry(Base):
+    __tablename__ = "waitlist_entries"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('waiting', 'offered', 'accepted', 'declined', "
+            "'expired', 'cancelled', 'ineligible')",
+            name="valid_waitlist_status",
+        ),
+        Index(
+            "uq_active_waitlist_pair",
+            "volunteer_id",
+            "slot_id",
+            unique=True,
+            sqlite_where=text("status IN ('waiting', 'offered')"),
+            postgresql_where=text("status IN ('waiting', 'offered')"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    volunteer_id: Mapped[int] = mapped_column(ForeignKey("volunteers.id"), nullable=False)
+    slot_id: Mapped[int] = mapped_column(ForeignKey("slots.id"), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="waiting")
+    service_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    offer_id: Mapped[int | None] = mapped_column(
+        ForeignKey("automation_invitations.id"), unique=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

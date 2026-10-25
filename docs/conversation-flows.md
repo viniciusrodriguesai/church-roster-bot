@@ -32,6 +32,15 @@ recebe o resultado automaticamente. O aceite verifica novamente todas as regras;
 envio e leitura não confirmam participação. `A<id>` identifica convites normais
 da automação e não interfere nas exceções `ACEITAR <id>` da Fase 2.
 
+## Lista de espera
+
+O voluntário pode enviar `ESPERA <vaga_id>` para entrar, `MINHAESPERA` para
+consultar somente as próprias posições e `SAIR_ESPERA <id>` para sair. A fila
+segue a ordem de entrada entre elegíveis com convites ativados por `INICIAR`.
+Quando há vaga, chega um convite `A<id>` sem pedir `CONVITES`. Recusa e expiração
+permitem chamar o próximo; aceitar confirma somente após revalidar as regras.
+Sair e entrar de novo coloca a pessoa no fim da fila. A lista não reserva vagas.
+
 ## Abertura mensal automática
 
 No menu do coordenador ou administrador com ministério selecionado, envie

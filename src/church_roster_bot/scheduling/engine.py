@@ -162,6 +162,7 @@ class RosterEngine:
         *,
         projected: Sequence[AssignmentIntent] = (),
         allow_published: bool = False,
+        require_capacity: bool = True,
     ) -> None:
         """Read-only advisory validation; assign() must still lock and revalidate.
 
@@ -176,7 +177,12 @@ class RosterEngine:
             if slot is None:
                 raise NotFound("slot not found")
             self._validate_assignment(
-                db, member, slot, projected=projected, allow_published=allow_published
+                db,
+                member,
+                slot,
+                projected=projected,
+                allow_published=allow_published,
+                require_capacity=require_capacity,
             )
 
     def confirm_reservation(self, assignment_id: int, *, db: Session | None = None) -> int:
@@ -394,6 +400,7 @@ class RosterEngine:
         allow_third: bool = False,
         allow_published: bool = False,
         projected: Sequence[AssignmentIntent] = (),
+        require_capacity: bool = True,
     ) -> None:
         service = db.get(WorshipService, slot.service_id)
         schedule = db.scalar(
@@ -436,7 +443,7 @@ class RosterEngine:
             or 0
         )
         occupied += sum(intent.slot_id == slot.id for intent in projected)
-        if occupied >= slot.capacity:
+        if require_capacity and occupied >= slot.capacity:
             raise NoCapacity("slot is full")
         days = self._monthly_days(db, member.id, service.service_date)
         already_on_day = bool(

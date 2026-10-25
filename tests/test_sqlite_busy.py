@@ -94,6 +94,9 @@ def test_terminal_stays_alive_and_preserves_input_while_another_writer_holds_the
             inputs.put("Oi")
             assert retried.wait(5)
             assert thread.is_alive() and not errors
+            # This synthetic writer made no changes. Rollback releases its
+            # reservation without competing for an exclusive COMMIT at 1 ms.
+            owner.rollback()
         assert received.wait(10), (output, errors)
         assert not errors
     finally:
@@ -118,6 +121,7 @@ def test_a_busy_receipt_after_transport_success_never_repeats_the_send(
                 lock_simulation_transaction(db)
                 locked.set()
                 assert release.wait(10)
+                db.rollback()
         except Exception as exc:
             failures.append(exc)
 

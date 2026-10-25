@@ -1,6 +1,6 @@
 # Fase 3: arquitetura e entrega incremental
 
-Status: distribuição com aprovação e aceite implementada; incrementos na branch
+Status: distribuição, abertura mensal e lista de espera implementadas; incrementos na branch
 `feature/phase-3-automation`. A Fase 2 permanece compatível. Este documento
 distingue decisões de arquitetura de funcionalidades já entregues.
 
@@ -44,6 +44,13 @@ distingue decisões de arquitetura de funcionalidades já entregues.
   Escalas abertas, em revisão, publicadas, fechadas ou canceladas não são
   sobrescritas. `ABERTURA DESATIVAR` desliga a rotina após confirmação e preserva
   a configuração. A automação é optativa e começa sem políticas habilitadas.
+- A lista de espera usa `ESPERA <vaga_id>`, `MINHAESPERA` e `SAIR_ESPERA <id>`.
+  Prioridade é FIFO por instante de entrada e ID entre voluntários elegíveis
+  com consentimento. Quando surge capacidade, o worker oferece uma posição
+  por vez disponível. Recusa, expiração ou retirada liberam a próxima oferta;
+  aceite é obrigatório e revalida a vaga. Reentrar após sair cria uma nova posição
+  no fim da fila. Alterações no culto invalidam entradas antigas em vez de
+  convidar silenciosamente para outra data. A fila não cria reservas de inscrição.
 
 ## Decisão: proposta, aprovação e confirmação são operações distintas
 
@@ -221,3 +228,18 @@ o fuso IANA da igreja para interpretar o horário configurado. Horários locais
 inexistentes geram um aviso deduplicado para revisão, em vez de abrir a escala
 em outro horário. Reiniciar o worker recupera execuções vencidas, sem repetir
 aberturas ou avisos já registrados. Falha no envio do aviso não desfaz a abertura.
+
+## Lista de espera
+
+`e31b4a6c8205` cria `waitlist_entries`, com índice único parcial para uma posição
+ativa por voluntário/vaga. Entrar permite vaga cheia, mas não ignora permissão,
+indisponibilidade, conflitos ou limite mensal. O aceite usa a validação completa
+do motor. Voluntários sem consentimento aguardam sem bloquear os demais elegíveis.
+Convites pendentes da própria fila são descontados da capacidade para evitar
+ofertas simultâneas da mesma posição; inscrições diretas continuam sujeitas ao
+motor e podem tornar uma oferta obsoleta. Não há garantia de reserva antes do aceite.
+
+As fases de manutenção usam transações distintas: expiração, abertura e oferta
+de vagas não carregam bloqueios de uma fase para a outra. A fila bloqueia
+voluntários, vagas, convites e entradas nessa ordem, com IDs crescentes. Contenção
+e atualização concorrente são testadas em PostgreSQL e SQLite em arquivo.
