@@ -29,6 +29,9 @@ class OutboundMessage(Base):
     invitation_id: Mapped[int | None] = mapped_column(
         ForeignKey("third_day_requests.id"), unique=True
     )
+    automation_invitation_id: Mapped[int | None] = mapped_column(
+        ForeignKey("automation_invitations.id"), unique=True
+    )
     dedupe_key: Mapped[str | None] = mapped_column(String(128), unique=True)
     recipient_e164: Mapped[str] = mapped_column(String(16), nullable=False)
     payload: Mapped[dict] = mapped_column(JSON, nullable=False)

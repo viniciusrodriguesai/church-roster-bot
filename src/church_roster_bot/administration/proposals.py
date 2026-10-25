@@ -31,7 +31,7 @@ def format_proposal(db: Session, proposal: DistributionProposal) -> str:
     if not proposal.suggestions and not proposal.unfilled:
         lines.append("Nenhuma vaga futura em aberto neste mês.")
     lines.append(
-        "Esta prévia não reserva vagas. Aprovação persistente e convites da distribuição "
-        "serão disponibilizados em um próximo incremento."
+        "Esta prévia não reserva vagas. Use PLANEJAR AAAA-MM para salvar; "
+        "depois VERPROPOSTA <id> e APROVAR <id> para revisar e convidar."
     )
     return "\n".join(lines)

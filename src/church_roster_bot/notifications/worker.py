@@ -8,10 +8,12 @@ from sqlalchemy import select
 
 from church_roster_bot.conversations.router import Bot
 from church_roster_bot.core.config import Settings, settings
-from church_roster_bot.core.database import SessionLocal
+from church_roster_bot.core.database import SessionLocal, is_sqlite_busy, retry_sqlite_transaction
+from church_roster_bot.notifications.automation import notify_offer, prepare_offer
 from church_roster_bot.notifications.invitations import notify_coordinator, prepare_invitation
 from church_roster_bot.notifications.outbox import apply_window
-from church_roster_bot.scheduling.models import ThirdDayRequest
+from church_roster_bot.scheduling.models import AutomationInvitation, ThirdDayRequest
+from church_roster_bot.scheduling.offers import expire_offers
 from church_roster_bot.whatsapp.client import MetaSendError, WhatsAppClient
 from church_roster_bot.whatsapp.models import InboundEvent, OutboundMessage
 from church_roster_bot.whatsapp.payloads import parse_message
@@ -38,6 +40,8 @@ class Worker:
         try:
             return self._process_one_transaction()
         except Exception as exc:
+            if is_sqlite_busy(exc):
+                return False
             # A failed business transaction rolls back before this receipt update.
             logger.error(
                 "inbound_processing_failed",
@@ -104,7 +108,7 @@ class Worker:
             event.attempts += 1
         return True
 
-    def send_one(self) -> bool:
+    def _claim_outgoing(self) -> tuple[bool, tuple[int, str, dict] | None]:
         # Persist the claim BEFORE calling Meta. A crash must never cause an automatic resend.
         with self.session_factory.begin() as db:
             lock_simulation_transaction(db)
@@ -116,17 +120,30 @@ class Worker:
                 .limit(1)
             )
             if outgoing is None:
-                return False
-            if outgoing.invitation_id:
+                return False, None
+            if outgoing.automation_invitation_id:
+                prepare_offer(db, outgoing, self.config)
+            elif outgoing.invitation_id:
                 prepare_invitation(db, outgoing, self.config)
             else:
                 apply_window(db, outgoing, self.config)
             if outgoing.status != "pending":
                 self._notify_delivery(db, outgoing)
-                return True
+                return True, None
             outgoing.status = "sending"
             outgoing.attempts += 1
-            outgoing_id, recipient, payload = outgoing.id, outgoing.recipient_e164, outgoing.payload
+            return True, (outgoing.id, outgoing.recipient_e164, outgoing.payload)
+
+    def send_one(self) -> bool:
+        try:
+            progressed, claim = self._claim_outgoing()
+        except Exception as exc:
+            if is_sqlite_busy(exc):
+                return False
+            raise
+        if claim is None:
+            return progressed
+        outgoing_id, recipient, payload = claim
 
         meta_id, status, error = None, "sent", None
         try:
@@ -144,17 +161,33 @@ class Worker:
         except Exception as exc:
             status, error = "unknown", type(exc).__name__[:64]
 
-        with self.session_factory.begin() as db:
-            outgoing = db.get(OutboundMessage, outgoing_id, with_for_update=True)
-            outgoing.meta_message_id = meta_id
-            outgoing.error_code = error
-            outgoing.status = "failed" if status == "pending" and outgoing.attempts >= 3 else status
-            if outgoing.status in {"failed", "unknown"}:
-                self._notify_delivery(db, outgoing)
+        def record_result() -> None:
+            with self.session_factory.begin() as db:
+                outgoing = db.get(OutboundMessage, outgoing_id, with_for_update=True)
+                outgoing.meta_message_id = meta_id
+                outgoing.error_code = error
+                outgoing.status = (
+                    "failed" if status == "pending" and outgoing.attempts >= 3 else status
+                )
+                if outgoing.status in {"failed", "unknown"}:
+                    self._notify_delivery(db, outgoing)
+
+        # A local lock after transport success retries only the receipt transaction.
+        retry_sqlite_transaction(record_result)
         return True
 
     def _notify_delivery(self, db, outgoing: OutboundMessage) -> None:
-        if outgoing.invitation_id:
+        if outgoing.automation_invitation_id:
+            if outgoing.status not in {"blocked_consent", "blocked_window", "failed", "unknown"}:
+                return
+            notify_offer(
+                db,
+                db.get(AutomationInvitation, outgoing.automation_invitation_id),
+                outgoing.status,
+                self.config,
+                outgoing.error_code,
+            )
+        elif outgoing.invitation_id:
             notify_coordinator(
                 db,
                 db.get(ThirdDayRequest, outgoing.invitation_id),
@@ -177,13 +210,24 @@ class Worker:
         self.recover_sending()
         while True:
             try:
-                progressed = self.process_one()
+                progressed = self.maintain()
+                progressed = self.process_one() or progressed
                 progressed = self.send_one() or progressed
                 if not progressed:
                     time.sleep(interval)
             except Exception as exc:
                 logger.error("worker_cycle_failed", extra={"error_type": type(exc).__name__})
                 time.sleep(5)
+
+    def maintain(self) -> bool:
+        try:
+            with self.session_factory.begin() as db:
+                lock_simulation_transaction(db)
+                return bool(expire_offers(db, self.config))
+        except Exception as exc:
+            if is_sqlite_busy(exc):
+                return False
+            raise
 
 
 if __name__ == "__main__":

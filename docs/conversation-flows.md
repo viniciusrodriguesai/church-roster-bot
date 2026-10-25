@@ -17,14 +17,20 @@ No menu do coordenador ou administrador com ministério selecionado, envie
 política de distribuição, as sugestões por vaga, a carga e o histórico usados
 em cada escolha e as posições sem candidato elegível. Somente cultos futuros
 no fuso da igreja entram no cálculo. Repetir o comando calcula uma nova prévia
-com o estado atual; não cria reservas, inscrições ou convites. Aprovação
-persistente e convites de distribuição ainda estão pendentes.
+com o estado atual; não cria reservas, inscrições ou convites.
 
 `PLANEJAR AAAA-MM` salva o cálculo como um rascunho com ID. `VERPROPOSTA <id>`
 mostra as escolhas e os motivos originais; `DESCARTAR <id>` pede `SIM` antes de
 cancelar, mantendo o histórico. Os comandos exigem autorização atual para o
 ministério selecionado. Salvar e revisar rascunhos ainda não envia convites nem
-atribui participações. A aprovação com convites será um incremento separado.
+atribui participações.
+
+`APROVAR <id>` → confirmação `SIM` → convites enviados pela outbox. A proposta
+inteira é revalidada; se uma vaga ficou indisponível, nenhum convite da aprovação
+é salvo. O voluntário responde `ACEITAR A<id>` ou `RECUSAR A<id>` e a coordenação
+recebe o resultado automaticamente. O aceite verifica novamente todas as regras;
+envio e leitura não confirmam participação. `A<id>` identifica convites normais
+da automação e não interfere nas exceções `ACEITAR <id>` da Fase 2.
 
 ## Administrador geral
 

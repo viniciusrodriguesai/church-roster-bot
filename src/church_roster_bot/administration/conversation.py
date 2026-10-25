@@ -39,6 +39,7 @@ from church_roster_bot.scheduling.lifecycle import (
     transition_schedule,
 )
 from church_roster_bot.scheduling.models import Assignment, ReplacementRequest, ThirdDayRequest
+from church_roster_bot.scheduling.offers import approve_proposal
 from church_roster_bot.scheduling.proposals import (
     cancel_proposal,
     create_proposal,
@@ -124,9 +125,10 @@ class AdminConversationMixin:
                     phone,
                     f"Proposta #{proposal_id} salva como rascunho. "
                     f"Envie VERPROPOSTA {proposal_id} para revisar ou DESCARTAR {proposal_id}. "
+                    f"Para convidar, envie APROVAR {proposal_id}. "
                     "Nenhuma inscrição ou convite foi criado.",
                 )
-            elif upper.startswith(("VERPROPOSTA ", "DESCARTAR ")):
+            elif upper.startswith(("VERPROPOSTA ", "DESCARTAR ", "APROVAR ")):
                 proposal_id = int(text.split()[1])
                 proposal = require_proposal(db, proposal_id, ministry.id, actor_type, actor_id)
                 if upper.startswith("VERPROPOSTA "):
@@ -136,7 +138,7 @@ class AdminConversationMixin:
                         f"Proposta #{proposal.id}: {proposal.status}.\n"
                         + format_proposal(db, proposal_snapshot(db, proposal)),
                     )
-                else:
+                elif upper.startswith("DESCARTAR "):
                     self._state(session, "admin_cancel_proposal_confirm", proposal_id=proposal_id)
                     self._send(
                         db,
@@ -146,10 +148,41 @@ class AdminConversationMixin:
                             [("SIM", "Descartar"), ("NAO", "Manter")],
                         ),
                     )
+                else:
+                    self._state(session, "admin_approve_proposal_confirm", proposal_id=proposal_id)
+                    self._send(
+                        db,
+                        phone,
+                        buttons_payload(
+                            f"Aprovar proposta #{proposal_id} e enviar convites? "
+                            "As inscrições dependem do aceite de cada voluntário.",
+                            [("SIM", "Aprovar"), ("NAO", "Cancelar")],
+                        ),
+                    )
             else:
                 self._menu(db, session, None, coordinator, None)
             return
-        if state == "admin_cancel_proposal_confirm":
+        if state == "admin_approve_proposal_confirm":
+            if upper == "SIM":
+                invitations = approve_proposal(
+                    db,
+                    self.roster,
+                    data["proposal_id"],
+                    ministry.id,
+                    actor_type,
+                    actor_id,
+                    self.config,
+                )
+                self._text(
+                    db,
+                    phone,
+                    f"Proposta aprovada: {len(invitations)} convite(s) registrado(s). "
+                    "Nenhuma participação é confirmada sem aceite.",
+                )
+            else:
+                self._text(db, phone, "Aprovação descartada; rascunho mantido.")
+            self._state(session, "menu")
+        elif state == "admin_cancel_proposal_confirm":
             if upper == "SIM":
                 cancel_proposal(db, data["proposal_id"], ministry.id, actor_type, actor_id)
                 self._text(db, phone, "Proposta descartada; histórico preservado.")

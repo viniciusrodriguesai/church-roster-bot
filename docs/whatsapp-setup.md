@@ -12,6 +12,13 @@ O webhook usa os bytes originais e `X-Hub-Signature-256`. Rejeita assinatura inv
 
 ## Contrato dos templates aprovados
 
+Para convites normais da Fase 3, `WHATSAPP_AUTOMATION_TEMPLATE` usa **um parâmetro
+de texto no corpo** e dois botões de resposta rápida: ACEITAR (índice 0) e RECUSAR
+(índice 1). O worker preenche os payloads `ACEITAR A<id>` e `RECUSAR A<id>`. O corpo
+inclui data, horário, função, motivo e os comandos. É um template separado dos
+convites excepcionais. Sem ele, fora da janela, o convite normal fica bloqueado.
+Nenhum template é solicitado ou aprovado automaticamente por esta configuração.
+
 `WHATSAPP_INVITE_TEMPLATE` deve apontar para um template já aprovado na Meta, no idioma de `WHATSAPP_TEMPLATE_LANGUAGE`, com cinco parâmetros posicionais no corpo: **ID do convite, data (dd/mm/aaaa), horário (HH:MM), função e justificativa**. Por exemplo: `Convite excepcional #{{1}} para {{2}} às {{3}}, função {{4}}. Justificativa: {{5}}. Escolha ACEITAR ou RECUSAR.` Configure dois botões de resposta rápida, nessa ordem: **ACEITAR** (índice 0) e **RECUSAR** (índice 1). O worker preenche os payloads com `ACEITAR <id>` e `RECUSAR <id>`; o webhook aceita as respostas de template e de botões interativos. A configuração local não solicita nem presume aprovação: rejeições da Meta são registradas como falha e notificadas à coordenação.
 
 `WHATSAPP_NOTIFICATION_TEMPLATE` é um template aprovado separado, com **um parâmetro de texto no corpo**, para os avisos ao coordenador (por exemplo, `Atualização da escala: {{1}}`). Ele carrega os dados do convite e o resultado: pendente, bloqueado, falhou, incerto, aceito ou recusado. Sem esse template e fora da janela, o aviso fica registrado como `blocked_window`, disponível para consulta em **Gerenciar exceções → LISTAR**. O template de convite nunca é reutilizado para avisos administrativos.

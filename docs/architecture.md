@@ -1,9 +1,8 @@
 # Arquitetura
 
-A Fase 2 está integrada. A Fase 3 começa pelo contrato de distribuição inteligente,
-separando planejamento, aprovação e confirmação; veja
-[Arquitetura e incrementos da automação](phase-3-automation.md). As decisões ali
-descritas não significam que os módulos futuros já estejam implementados.
+A Fase 2 está integrada. A distribuição da Fase 3 separa planejamento, aprovação
+e confirmação; veja [Arquitetura e incrementos da automação](phase-3-automation.md)
+para o estado de cada módulo e o roteiro das funcionalidades futuras.
 
 Monólito modular com FastAPI, SQLAlchemy 2, Alembic e PostgreSQL. O módulo `scheduling.engine` permanece como fonte das regras de inscrição. `scheduling.lifecycle` define transições, substituições manuais e versões. `administration` aplica o escopo do coordenador. `conversations` mantém as etapas no banco. `whatsapp` contém o webhook, parser e cliente Graph API. `notifications.worker` consome eventos e envia a caixa de saída. `audit` registra mudanças sem copiar números ou tokens para os detalhes.
 
@@ -15,9 +14,26 @@ Monólito modular com FastAPI, SQLAlchemy 2, Alembic e PostgreSQL. O módulo `sc
 
 Na confirmação de uma exceção, `notifications.invitations` grava uma saída única vinculada ao convite, dentro da transação da conversa. O worker revalida consentimento e janela, preenche o template aprovado quando necessário e registra a tentativa em uma transação anterior à chamada externa. Falhas definitivas, bloqueios e resultados incertos geram avisos deduplicados ao coordenador. A resposta ACEITAR/RECUSAR também gera aviso na transação da decisão e funciona após a expiração da sessão. Status de transporte nunca criam inscrições. Veja o [contrato dos templates](whatsapp-setup.md#contrato-dos-templates-aprovados).
 
+`scheduling.distribution` calcula a proposta sem escrita; `scheduling.proposals`
+preserva os itens e motivos e verifica o escopo atual; `scheduling.offers` aprova
+sob bloqueios ordenados e cria convites normais. `notifications.automation`
+prepara a entrega, respeita consentimento e templates e avisa a coordenação.
+O aceite `A<id>` passa de novo pelo motor antes de criar a inscrição. Convites
+não reservam capacidade. Uma impressão digital vincula o aceite ao culto
+oferecido, incluindo seu fuso; alterações cancelam o convite. A manutenção do
+worker expira convites de forma transacional e idempotente, sem exigir entrada
+de um usuário. Exceções numéricas da Fase 2 mantêm seu fluxo independente.
+
 O simulador escreve o mesmo evento de entrada e usa o mesmo worker e roteador. Ele **não chama a Meta**. Os testes rápidos usam SQLite; a CI usa PostgreSQL para migração e concorrência. Em produção, use somente PostgreSQL.
 
 No terminal, uma thread processa e entrega mensagens com transporte local e consulta a caixa recebida enquanto a entrada de texto aguarda no processo principal. Assim, um convite iniciado em outro terminal aparece sem nova entrada. Transações de processamento e reserva de envio usam `BEGIN IMMEDIATE` no SQLite para serializar os terminais locais, enquanto o PostgreSQL mantém os bloqueios de linha existentes.
+
+Contenção temporária `SQLITE_BUSY`/`SQLITE_LOCKED` não encerra o simulador.
+Reivindicações que sofreram rollback aguardam outro ciclo, sem consumir uma
+tentativa. Entradas digitadas são conservadas até a gravação. Se o transporte
+já retornou, apenas a transação do recibo é repetida, nunca o envio externo.
+Outros erros de banco continuam sendo reportados. Essa política é específica
+do SQLite local e não mascara falhas de PostgreSQL.
 
 A fronteira de entrada do terminal filtra transcrições antes de criar eventos: linhas marcadas com `[bot]`/`[sim]`, prompts, opções renderizadas e blocos com várias linhas não são comandos. Cabeçalhos do formato antigo também são reconhecidos, inclusive com acentos corrompidos no console. Toda linha de saída recebe uma marca, inclusive parâmetros de templates. Essa proteção é exclusiva da interface local; o webhook e `receive()` preservam texto livre. A apresentação consulta somente saídas enviadas ao telefone daquele terminal e registra seus IDs em memória, incluindo mensagens antigas que estavam pendentes. Mensagens já enviadas antes da abertura do terminal não são reapresentadas; uma mudança posterior de `sent` para `delivered`/`read` também não repete a apresentação. Nenhum ciclo de consulta cria eventos de entrada.
 

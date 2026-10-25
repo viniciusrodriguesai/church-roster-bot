@@ -9,7 +9,7 @@ from sqlalchemy import select
 
 from church_roster_bot.core import models  # noqa: F401
 from church_roster_bot.core.config import Settings
-from church_roster_bot.core.database import SessionLocal
+from church_roster_bot.core.database import SessionLocal, is_sqlite_busy, retry_sqlite_transaction
 from church_roster_bot.notifications.worker import Worker
 from church_roster_bot.whatsapp.models import InboundEvent, OutboundMessage
 from church_roster_bot.whatsapp.payloads import normalize_phone
@@ -158,6 +158,7 @@ def run_terminal(
     config = Settings(
         whatsapp_invite_template="simulacao_convite",
         whatsapp_notification_template="simulacao_notificacao",
+        whatsapp_automation_template="simulacao_automacao",
     )
     worker = Worker(session_factory=factory, config=config, client=SimulationClient())
     inbox = TerminalInbox(phone, factory)
@@ -167,12 +168,17 @@ def run_terminal(
     def deliver():
         try:
             while not stopped.is_set():
-                worker.process_one()
-                for _ in range(100):
-                    if not worker.send_one():
-                        break
-                for reply in inbox.poll():
-                    write("\n" + render_terminal_reply(reply))
+                try:
+                    worker.maintain()
+                    worker.process_one()
+                    for _ in range(100):
+                        if not worker.send_one():
+                            break
+                    for reply in inbox.poll():
+                        write("\n" + render_terminal_reply(reply))
+                except Exception as exc:
+                    if not is_sqlite_busy(exc):
+                        raise
                 stopped.wait(interval)
         except Exception as exc:
             errors.append(exc)
@@ -188,7 +194,7 @@ def run_terminal(
         while not stopped.is_set():
             text = terminal_input(read("> "))
             if text is not None:
-                receive(phone, text, factory=factory)
+                retry_sqlite_transaction(lambda text=text: receive(phone, text, factory=factory))
     except EOFError:
         pass
     finally:

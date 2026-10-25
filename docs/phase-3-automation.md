@@ -1,6 +1,6 @@
 # Fase 3: arquitetura e entrega incremental
 
-Status: arquitetura, prévia e revisão persistente entregues; incrementos na branch
+Status: distribuição com aprovação e aceite implementada; incrementos na branch
 `feature/phase-3-automation`. A Fase 2 permanece compatível. Este documento
 distingue decisões de arquitetura de funcionalidades já entregues.
 
@@ -21,8 +21,7 @@ distingue decisões de arquitetura de funcionalidades já entregues.
   instantes de geração são UTC e cultos já iniciados no fuso da igreja são excluídos.
 - No menu do coordenador ou administrador, `PROPOR AAAA-MM` apresenta a prévia
   e as explicações. Repetir o comando recalcula o estado atual; não reserva vagas
-  nem habilita aprovação neste incremento. Aprovação persistente e aceite por
-  convite continuam pendentes. Consultas de prévia não exigem migração.
+  nem altera propostas salvas. A aprovação usa o ID de um rascunho persistido.
 - `PLANEJAR AAAA-MM` salva um rascunho identificado com a versão da política,
   a ordem das sugestões, pontuações e falta de cobertura. `VERPROPOSTA <id>`
   recupera o resultado original sem recalcular as escolhas; `DESCARTAR <id>`
@@ -30,6 +29,14 @@ distingue decisões de arquitetura de funcionalidades já entregues.
   reavaliada a cada operação e limitada ao ministério selecionado. Cancelamentos
   repetidos ou concorrentes gravam uma única decisão. Nenhuma inscrição ou
   convite é criado por esses comandos.
+- `APROVAR <id>` pede confirmação e revalida a proposta inteira sob bloqueios.
+  Uma proposta obsoleta falha atomicamente. Aprovar grava convites normais e a
+  outbox, sem confirmar participações. O voluntário responde `ACEITAR A<id>` ou
+  `RECUSAR A<id>`, inclusive após a sessão expirar. O aceite revalida capacidade,
+  permissão, disponibilidade, conflitos e limite mensal; a coordenação recebe
+  a decisão. Repetir a aprovação ou o aceite não duplica convites, inscrições
+  ou avisos. Uma impressão digital impede aceitar um culto movido depois do
+  convite. O prazo termina no início do culto ou na validade configurada.
 
 ## Decisão: proposta, aprovação e confirmação são operações distintas
 
@@ -37,7 +44,7 @@ O `RosterEngine` continua sendo a autoridade para permissões, indisponibilidade
 conflitos, capacidade e limite mensal. Automação não ganha uma forma alternativa
 de gravar participações nem uma autorização implícita de terceiro dia.
 
-A distribuição terá três fronteiras:
+A distribuição usa três fronteiras:
 
 1. **Planejamento:** leitura do estado atual e cálculo determinístico de uma
    proposta. Retorna candidatos, pontuação explicável e posições sem cobertura;
@@ -88,6 +95,7 @@ igreja; instantes de criação, expiração, envio e lembrete são UTC.
 
 | Responsabilidade | Fronteira prevista | Invariante |
 | --- | --- | --- |
+| Abertura mensal automática | Política optativa por ministério e tarefa periódica | Só abrir escalas configuradas; nunca reabrir escala encerrada |
 | Propostas e seleção | `scheduling` | Calcular não confirma nem envia |
 | Lista de espera | Fila persistida por vaga, FIFO por entrada e ID | Notificar não atribui; aceite revalida vaga e elegibilidade |
 | Substituição automática | Convite persistido ligado a `ReplacementRequest` | O original ocupa a vaga até troca aceita e atômica |
@@ -126,11 +134,12 @@ worker não deve recriar decisões nem interpretar entrega como aceite.
    conflitos e carga projetada; testes de determinismo e de leitura sem escrita.
 3. Revisão persistente e aplicação segura: migração, autorização, aprovação,
    aceite, rollback, idempotência e concorrência PostgreSQL; comandos do simulador.
-4. Espera FIFO e oferta de vaga, com revalidação no aceite.
-5. Substituição por convite, notificações às partes e progressão após recusa.
-6. Lembretes configuráveis, relógio testável, UTC e fusos da igreja.
-7. Emergências usando os mesmos mecanismos e escalonamento à coordenação.
-8. Relatórios autorizados de participação, equilíbrio, vagas e substituições.
+4. Abertura mensal automática configurável, com recuperação após reinício.
+5. Espera FIFO e oferta de vaga, com revalidação no aceite.
+6. Substituição por convite, notificações às partes e progressão após recusa.
+7. Lembretes configuráveis, relógio testável, UTC e fusos da igreja.
+8. Emergências usando os mesmos mecanismos e escalonamento à coordenação.
+9. Relatórios autorizados de participação, equilíbrio, vagas e substituições.
 
 Cada incremento deve ter teste de comportamento, documentação atualizada,
 `pytest`, `ruff check`, `ruff format --check` e revisão do diff antes do commit.
@@ -168,3 +177,30 @@ verificados antes e depois. O downgrade remove somente as novas tabelas de
 propostas; rascunhos da Fase 3 devem ser exportados antes de um downgrade caso
 precisem ser conservados. Os bancos locais existentes não são migrados pelo
 desenvolvimento.
+
+## Convites normais e relógio
+
+`c31a2e6b8904` acrescenta `automation_invitations` e um vínculo opcional único na
+outbox. Convites excepcionais numéricos da Fase 2 continuam separados. Para
+automação normal, `A<id>` evita ambiguidade com os IDs de exceção.
+
+`WHATSAPP_AUTOMATION_TEMPLATE` é um template separado, com um parâmetro de corpo
+e dois botões de resposta rápida para os comandos de aceite/recusa. Sem janela
+de 24 horas e sem esse template aprovado, o envio fica `blocked_window`.
+`INICIAR` libera somente convites bloqueados ainda sem tentativa. Consentimento
+é revalidado antes do envio. Falhas e resultados ambíguos seguem a política
+existente de não reenviar automaticamente; a coordenação recebe avisos deduplicados.
+O simulador usa um nome de template fictício e transporte local.
+
+`AUTOMATION_INVITE_TTL_HOURS` controla a validade (48 horas por padrão, de 1 a
+168). O worker expira convites sem depender de uma nova mensagem. Instantes
+internos são UTC; horários civis usam o fuso IANA da igreja. Horários inexistentes
+na mudança de horário de verão são rejeitados; horários ambíguos usam a primeira
+ocorrência. A aprovação não substitui o aceite e nunca autoriza um terceiro dia.
+
+A validação com dois processos reais encontrou contenção de SQLite durante uma
+operação longa de proposta. A regressão `tests/test_sqlite_busy.py` mantém um
+writer aberto e verifica que os terminais preservam a entrada, que eventos
+pendentes não consomem tentativas e que um bloqueio no recibo após o transporte
+não repete o envio. Somente códigos de contenção SQLite são tratados assim;
+outras falhas operacionais propagam normalmente.

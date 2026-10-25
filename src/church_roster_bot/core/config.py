@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     whatsapp_api_version: str = "v25.0"
     whatsapp_invite_template: str = ""
     whatsapp_notification_template: str = ""
+    whatsapp_automation_template: str = ""
+    automation_invite_ttl_hours: int = Field(default=48, ge=1, le=168)
     whatsapp_template_language: str = "pt_BR"
     conversation_ttl_minutes: int = Field(default=30, ge=1, le=1440)
     webhook_max_bytes: int = Field(default=262144, ge=1024)

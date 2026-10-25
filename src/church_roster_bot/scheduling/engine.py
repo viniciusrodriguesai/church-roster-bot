@@ -161,6 +161,7 @@ class RosterEngine:
         slot_id: int,
         *,
         projected: Sequence[AssignmentIntent] = (),
+        allow_published: bool = False,
     ) -> None:
         """Read-only advisory validation; assign() must still lock and revalidate.
 
@@ -174,7 +175,9 @@ class RosterEngine:
             slot = db.get(Slot, slot_id)
             if slot is None:
                 raise NotFound("slot not found")
-            self._validate_assignment(db, member, slot, projected=projected)
+            self._validate_assignment(
+                db, member, slot, projected=projected, allow_published=allow_published
+            )
 
     def confirm_reservation(self, assignment_id: int, *, db: Session | None = None) -> int:
         with self._transaction(db) as db:

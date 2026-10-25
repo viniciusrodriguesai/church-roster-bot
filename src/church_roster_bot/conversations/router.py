@@ -23,6 +23,7 @@ from church_roster_bot.members.models import (
     VolunteerRole,
 )
 from church_roster_bot.ministries.models import Church, Ministry, Role
+from church_roster_bot.notifications.automation import activate_offers
 from church_roster_bot.notifications.invitations import activate_invitations, notify_coordinator
 from church_roster_bot.notifications.outbox import apply_window
 from church_roster_bot.scheduling.engine import RosterEngine
@@ -38,6 +39,7 @@ from church_roster_bot.scheduling.models import (
     MonthlySchedule,
     ThirdDayRequest,
 )
+from church_roster_bot.scheduling.offers import respond_offer
 from church_roster_bot.services.models import Slot, WorshipService
 from church_roster_bot.whatsapp.models import OutboundMessage
 from church_roster_bot.whatsapp.payloads import (
@@ -198,11 +200,35 @@ class Bot(AdminConversationMixin):
                 volunteer.invite_opt_in = True
                 db.flush()
                 activate_invitations(db, volunteer.id, self.config)
+                activate_offers(db, volunteer.id, self.config)
             self._text(db, phone, "Convites ativados.")
             return
         if upper in {"MENU", "CANCELAR"}:
             session.data = {"ministry_id": session.data.get("ministry_id")}
             self._menu(db, session, admin, coordinator, volunteer)
+            return
+        if upper.startswith(("ACEITAR A", "RECUSAR A")) and volunteer:
+            try:
+                parts = upper.split()
+                if len(parts) != 2 or not parts[1][1:].isdigit():
+                    raise RosterError("use ACEITAR A<id> ou RECUSAR A<id>")
+                decision = respond_offer(
+                    db,
+                    self.roster,
+                    volunteer.id,
+                    int(parts[1][1:]),
+                    parts[0] == "ACEITAR",
+                    self.config,
+                )
+                replies = {
+                    "accepted": "Convite aceito; inscrição confirmada.",
+                    "declined": "Convite recusado.",
+                    "expired": "Convite expirado; nenhuma inscrição foi criada.",
+                    "cancelled": "Convite cancelado; a vaga ou sua elegibilidade mudou.",
+                }
+                self._text(db, phone, replies[decision.status])
+            except (ValueError, RosterError) as exc:
+                self._text(db, phone, f"Convite não aplicado: {exc}")
             return
         if upper.startswith(("ACEITAR ", "RECUSAR ")) and volunteer:
             try:

@@ -143,3 +143,45 @@ class RosterProposalItem(Base):
     slot_id: Mapped[int] = mapped_column(ForeignKey("slots.id"), nullable=False)
     volunteer_id: Mapped[int] = mapped_column(ForeignKey("volunteers.id"), nullable=False)
     score: Mapped[dict] = mapped_column(JSON, nullable=False)
+
+
+class AutomationInvitation(Base):
+    __tablename__ = "automation_invitations"
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('distribution', 'waitlist', 'replacement', 'emergency')",
+            name="valid_automation_invitation_kind",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'accepted', 'declined', 'expired', 'cancelled')",
+            name="valid_automation_invitation_status",
+        ),
+        CheckConstraint("expires_at > created_at", name="valid_automation_invitation_expiry"),
+        Index(
+            "uq_pending_automation_pair",
+            "volunteer_id",
+            "slot_id",
+            unique=True,
+            sqlite_where=text("status = 'pending'"),
+            postgresql_where=text("status = 'pending'"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    source_key: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    slot_id: Mapped[int] = mapped_column(ForeignKey("slots.id"), nullable=False)
+    volunteer_id: Mapped[int] = mapped_column(ForeignKey("volunteers.id"), nullable=False)
+    proposal_item_id: Mapped[int | None] = mapped_column(
+        ForeignKey("roster_proposal_items.id"), unique=True
+    )
+    replacement_request_id: Mapped[int | None] = mapped_column(
+        ForeignKey("replacement_requests.id")
+    )
+    assignment_id: Mapped[int | None] = mapped_column(ForeignKey("assignments.id"), unique=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    reason: Mapped[str] = mapped_column(String(1000), nullable=False)
+    service_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
