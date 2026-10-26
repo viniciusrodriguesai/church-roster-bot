@@ -1,6 +1,8 @@
 # Fase 4.1 — auditoria de segurança e preparação para produção
 
-Status: em andamento em `feature/phase-4-production`, a partir de `d563eb2`.
+Auditoria e correções da Fase 4.1 em `feature/phase-4-production`, a partir de
+`d563eb2`. A aprovação depende dos gates ao final e da CI do SHA publicado;
+o relatório técnico registra os resultados e evidências da execução final.
 As Fases 1–3 estão integradas à main. Esta etapa não implanta serviços, não
 configura PostgreSQL definitivo e não conecta números, tokens ou templates reais.
 Toda operação de coordenadores e voluntários continua pelo WhatsApp.
@@ -36,7 +38,7 @@ worker, com transporte fictício. Não há nova fila externa ou painel administr
 | S02 | Média | Tokens/assinaturas não ASCII geravam erro 500; remetente com tipo inválido podia derrubar processamento | Corrigido: assinatura ASCII estrita, comparação de tokens em bytes, telefone tipado/ASCII |
 | S03 | Alta | Qualquer IntegrityError era tratado como duplicata; SQLite podia liberar SAVEPOINT fora de BEGIN e confirmar parte do lote | Corrigido: duplicata comprovada e BEGIN IMMEDIATE em SQLite; demais erros retornam 503 com rollback |
 | S04 | Média | Truncamento do identificador de status colidia entre recibos diferentes | Corrigido: hash da identidade completa quando excede a coluna; IDs curtos preservados |
-| D01 | Alta no ambiente de instalação | pip 25.0.1 incluído na imagem de teste tem alertas de extração/instalação de pacotes | Bootstrap da CI exige pip >=26.2.2; repetir auditoria do ambiente atualizado |
+| D01 | Alta no ambiente de instalação | pip 25.0.1 incluído na imagem de teste tem alertas de extração/instalação de pacotes | Corrigido: bootstrap pip >=26.2.2, ambiente atualizado sem alertas conhecidos; auditoria obrigatória na CI |
 | L01 | Média | Migrações programáticas desativavam loggers da aplicação, suprimindo diagnóstico de falhas | Corrigido: preservar loggers; opção de manter configuração de logging do chamador; engine descartado em finally |
 | A01 | Alta | Coordenador parcial podia trocar telefone, nome ou atividade de voluntário compartilhado, afetando sua identidade em outro ministério | Corrigido: conferir autoridade atual e todos os ministérios afetados; funções continuam locais |
 | A02 | Alta | Novo telefone herdava consentimento concedido ao número antigo | Corrigido: mudança real de telefone desativa notificações até INICIAR do novo número |
@@ -137,6 +139,7 @@ fingerprint de identidade (culto, vaga, função, ministério, data, hora e fuso
 O aceite exige a identidade autorizada originalmente. A criação registra esse
 snapshot; o transporte e o aceite o conferem novamente. Consultas de identidade
 e fuso relêem objetos que podem estar no cache ORM de uma transação mais longa.
+Elegibilidade também relê atividade da função e propriedade do ministério.
 Os testes controlam somente o relógio da aplicação, inclusive o instante exato
 de início; o relógio do computador não é alterado.
 
@@ -153,9 +156,32 @@ de teste, representando seis IDs de advisory distintos, com entradas duplicadas
 na resposta da base. Nenhuma dependência de runtime do aplicativo recebeu alerta
 nessa execução. Isso não é uma garantia de segurança. O instalador faz parte da
 cadeia de fornecimento: a CI passa a atualizar pip para `>=26.2.2,<27` antes de
-instalar o projeto. A auditoria será repetida após essa atualização, sem ignorar
-IDs ou desligar a falha de segurança. Bandit não encontrou achados no src nessa
-primeira execução. Guardar as versões e os JSONs no relatório final.
+instalar o projeto. A auditoria do ambiente atualizado não encontrou alertas
+conhecidos, sem ignorar IDs ou desligar a falha de segurança. Bandit não encontrou
+achados no src. Versões e JSONs devem acompanhar o relatório; executar os scanners
+novamente na revisão final, pois a base de vulnerabilidades muda.
+
+## Segurança na integração contínua
+
+O extra opcional `security` instala pip-audit e Bandit somente para desenvolvimento
+e verificação. A CI executa pip check, Ruff, formatação, upgrade/check do Alembic,
+Bandit, pip-audit e pytest com PostgreSQL descartável. Achado ou indisponibilidade
+do scanner falha o job; não há allowlist de vulnerabilidades ou continue-on-error.
+O pacote local não publicado não recebe análise de vulnerabilidades pelo índice:
+a revisão de código e o Bandit complementam essa limitação do pip-audit.
+
+As actions oficiais são fixadas em SHA (checkout v7.0.1 e setup-python v7.1.0,
+runtime Node 24), o token tem somente contents:read e não permanece no checkout.
+O job tem prazo de 15 minutos. Atualizações desses SHAs devem ser revisadas e
+testadas; o pin não elimina risco na cadeia de fornecimento. As dependências
+Python mantêm intervalos compatíveis; preservar a lista exata instalada nas
+evidências e fixar o ambiente de implantação após a decisão de hospedagem.
+
+O aviso StarletteDeprecationWarning observado foi investigado no TestClient
+oficial 1.10.0: o fallback de testes para httpx está depreciado em favor de httpx2.
+Os testes continuam funcionando; o transporte Meta usa httpx e não depende desse
+fallback. O aviso não é suprimido. Uma atualização futura do cliente de testes
+deve ser feita com a suíte completa, sem trocar o transporte de produção por isso.
 
 ## Falhas, segredos e riscos residuais
 
@@ -188,8 +214,11 @@ primeira execução. Guardar as versões e os JSONs no relatório final.
   instâncias executando recuperação de startup simultânea.
 - Banco indisponível e transação rejeitada não podem produzir confirmação
   parcial. PostgreSQL descartável é obrigatório para validar bloqueios reais.
-- Um status que chega antes de gravar o ID de saída ainda exige revisão específica
-  nesta auditoria. Não prometer reconciliação automática sem testá-la.
+- O único worker processa recibos depois de concluir seu envio; um recibo que
+  chega ao webhook nesse intervalo permanece na inbox. Se o processo cair após
+  envio externo e antes de gravar o ID, a relação com o recibo pode ser perdida.
+  O claim é recuperado como unknown, sem reenvio; reconciliação manual é um limite
+  do contrato de entrega, não se promete exatamente uma entrega na rede externa.
 - Não registrar corpos, telefones, tokens, URLs de banco ou str(exc) de banco.
   Logs devem usar identificador interno e tipo do erro. O servidor HTTP externo
   também deve omitir/redigir a query de verificação Meta: ela contém verify_token.
@@ -206,11 +235,16 @@ DATABASE_URL/TEST_DATABASE_URL. Nunca apontar testes a demo.sqlite3 ou a um
 banco existente: fixtures de concorrência criam/removem tabelas próprias.
 
 ```text
+python -m pip install --upgrade 'pip>=26.2.2,<27'
+python -m pip install -e '.[dev,security]'
+python -m pip check
 pytest -q tests/test_webhook_security.py tests/test_phase2.py
 ruff check .
 ruff format --check .
 alembic upgrade head
 alembic check
+bandit -r src
+pip-audit --progress-spinner off
 pytest -q
 ```
 
@@ -218,6 +252,16 @@ As regressões cobrem corpo fragmentado com cauda que não deve ser lida, prazo
 de leitura, assinatura/token inválidos, tipos maliciosos, rollback de lote e
 recibos longos. O erro de persistência é inserido no limite real do flush;
 a transação e as restrições são exercitadas em SQLite e PostgreSQL.
+Há também interrupção real de um backend PostgreSQL exclusivo do teste, depois
+do flush do negócio: a transação reverte, o evento conserva suas tentativas e
+é processado uma vez após reconectar. Nenhum banco ou processo externo à bateria
+é encerrado. Testes de reinício, workers concorrentes e simuladores são mantidos.
+
+As migrações novas não alteram dados de negócio existentes. Um downgrade remove
+o contexto novo; se houver upgrade posterior, avisos sem escopo e autorizações
+pendentes sem snapshot voltam a exigir revisão, em vez de presumir permissões.
+Downgrades são validados somente em ambientes descartáveis. Antes de qualquer
+migração real, exigir backup/restauração testados e revisão operacional.
 
 ## Health e gates de conclusão
 
@@ -270,3 +314,7 @@ solicitação; nenhuma etapa seguinte é iniciada automaticamente.
 - [PyPA pip-audit: cobertura e limitações](https://github.com/pypa/pip-audit).
 - [pip 26.2.2, distribuição oficial](https://pypi.org/project/pip/26.2.2/).
 - [Advisory PyPA para pip, PYSEC-2026-3721](https://github.com/pypa/advisory-database/blob/main/vulns/pip/PYSEC-2026-3721.yaml).
+- [Bandit: configuração e limites das verificações](https://bandit.readthedocs.io/en/latest/config.html).
+- [Starlette 1.10.0: TestClient e fallback depreciado](https://github.com/Kludex/starlette/blob/1.10.0/starlette/testclient.py).
+- [Checkout v7.0.1](https://github.com/actions/checkout/releases/tag/v7.0.1).
+- [Setup Python v7.1.0](https://github.com/actions/setup-python/releases/tag/v7.1.0).

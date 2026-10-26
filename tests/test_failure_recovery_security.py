@@ -5,8 +5,8 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import event, func, select
-from sqlalchemy.exc import OperationalError
+from sqlalchemy import event, func, select, text
+from sqlalchemy.exc import DBAPIError, OperationalError
 
 from church_roster_bot.conversations.models import ConversationSession
 from church_roster_bot.core.config import Settings
@@ -270,3 +270,37 @@ def test_settings_repr_and_validation_errors_do_not_print_sensitive_inputs():
     with pytest.raises(ValidationError) as caught:
         Settings(_env_file=None, whatsapp_api_version=secret)
     assert secret not in str(caught.value)
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("roster", ["postgres"], indirect=True)
+def test_real_database_disconnect_rolls_back_and_retries_the_original_event(roster):
+    engine, factory, ids = roster
+    add(engine, ids)
+    event_id = receive(FIRST, "Oi", factory=factory)
+    worker = Worker(factory, Settings(_env_file=None), RecordingClient())
+    original = worker.bot.handle
+
+    def disconnect(db, message):
+        original(db, message)
+        db.flush()
+        pid = db.scalar(text("SELECT pg_backend_pid()"))
+        # Only this test's checked-out backend in the disposable PostgreSQL is
+        # terminated. No server, worker of another test, or original DB is stopped.
+        with factory.kw["bind"].connect().execution_options(isolation_level="AUTOCOMMIT") as admin:
+            assert admin.scalar(text("SELECT pg_terminate_backend(:pid)"), {"pid": pid})
+
+    worker.bot.handle = disconnect
+    with pytest.raises(DBAPIError):
+        worker.process_one()
+    with factory() as db:
+        receipt = db.get(InboundEvent, event_id)
+        assert (receipt.status, receipt.attempts) == ("pending", 0)
+        assert db.scalar(select(func.count(OutboundMessage.id))) == 0
+    worker.bot.handle = original
+    assert worker.process_one()
+    assert not worker.process_one()
+    with factory() as db:
+        receipt = db.get(InboundEvent, event_id)
+        assert (receipt.status, receipt.attempts) == ("processed", 1)
+        assert db.scalar(select(func.count(OutboundMessage.id))) == 1

@@ -1,6 +1,6 @@
 # Church Roster Bot
 
-Bot open source para escalas de voluntários pelo WhatsApp. **Estado: Fases 1–3 integradas; Fase 4.1 em auditoria na branch de desenvolvimento. Nenhum número real da Meta foi conectado ou testado.** O Diaconato é o primeiro ministério. Não há painel web.
+Bot open source para escalas de voluntários pelo WhatsApp. **Estado: Fases 1–3 integradas; código e auditoria da Fase 4.1 na branch de desenvolvimento. Nenhum número real da Meta foi conectado ou testado.** O Diaconato é o primeiro ministério. Não há painel web.
 
 ## O que funciona
 
@@ -68,11 +68,24 @@ lifespan ASGI. Consulte [auditoria e limitações](docs/phase-4-1-security.md).
 
 ## Verificação
 
+Configure DATABASE_URL e TEST_DATABASE_URL para PostgreSQL descartável antes
+da bateria. Instale o extra de segurança em um ambiente de desenvolvimento isolado:
+
 ```powershell
+.venv\Scripts\python.exe -m pip install --upgrade 'pip>=26.2.2,<27'
+.venv\Scripts\python.exe -m pip install -e '.[dev,security]'
+.venv\Scripts\python.exe -m pip check
 .venv\Scripts\python.exe -m pytest -q
 .venv\Scripts\ruff.exe check .
 .venv\Scripts\ruff.exe format --check .
+.venv\Scripts\alembic.exe check
+.venv\Scripts\bandit.exe -r src
+.venv\Scripts\pip-audit.exe --progress-spinner off
 ```
+
+A CI repete essas verificações, aplica migrações em banco vazio e executa os
+testes de migração/rollback e concorrência. Veja a [auditoria da Fase 4.1](docs/phase-4-1-security.md)
+para findings, testes de falhas e limites de segurança. Não use bancos existentes.
 
 `TEST_DATABASE_URL` ativa o teste de concorrência. Use **um banco PostgreSQL descartável**, pois esse teste cria e remove tabelas. Veja [Testes da Fase 2](docs/phase-2-testing.md).
 

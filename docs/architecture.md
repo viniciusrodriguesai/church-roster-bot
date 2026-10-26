@@ -95,6 +95,20 @@ A fronteira de entrada do terminal filtra transcrições antes de criar eventos:
 
 ## Estados e versões
 
+Autorizações excepcionais preservam o fingerprint do culto apresentado: data,
+hora, função, ministério e fuso. Convites alterados, sem snapshot comprovado ou
+posteriores ao início não confirmam inscrições. Nova autorização preserva o
+pedido anterior. Avisos de coordenador guardam identidade e ministério e conferem
+permissão, atividade e telefone novamente no claim; avisos de membros reutilizam
+a verificação de consentimento e destinatário imediatamente antes do transporte.
+
+Recuperação de startup integra o ciclo de retry do worker. Indisponibilidade do
+banco reverte o negócio e preserva o evento; depois de falhar a gravação de um
+recibo de envio, claims duráveis são reconciliados antes de prosseguir. Estados
+read/delivered não regridem por um failed atrasado. Logs usam tipos de erro e
+IDs internos, sem corpos ou detalhes de conexão. A [auditoria](phase-4-1-security.md)
+registra os riscos residuais e as limitações do contrato de entrega.
+
 Veja [Estados da escala](schedule-states.md). Estados lógicos de vaga são derivados das participações, sem coluna de vaga que possa ficar desatualizada. Cada publicação grava conteúdo e uma impressão digital dos IDs e estados de participação; alterações criam nova versão mesmo se dois responsáveis tiverem o mesmo nome. A atualização para encaminhar é gerada por diferença de linhas. Histórico anterior não é apagado.
 
 ## Controle de acesso
