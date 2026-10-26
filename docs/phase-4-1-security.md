@@ -37,6 +37,7 @@ worker, com transporte fictício. Não há nova fila externa ou painel administr
 | S03 | Alta | Qualquer IntegrityError era tratado como duplicata; SQLite podia liberar SAVEPOINT fora de BEGIN e confirmar parte do lote | Corrigido: duplicata comprovada e BEGIN IMMEDIATE em SQLite; demais erros retornam 503 com rollback |
 | S04 | Média | Truncamento do identificador de status colidia entre recibos diferentes | Corrigido: hash da identidade completa quando excede a coluna; IDs curtos preservados |
 | D01 | Alta no ambiente de instalação | pip 25.0.1 incluído na imagem de teste tem alertas de extração/instalação de pacotes | Bootstrap da CI exige pip >=26.2.2; repetir auditoria do ambiente atualizado |
+| L01 | Média | Migrações programáticas desativavam loggers da aplicação, suprimindo diagnóstico de falhas | Corrigido: preservar loggers; opção de manter configuração de logging do chamador; engine descartado em finally |
 | A01 | Em investigação | Campos globais de voluntário compartilhado podem afetar outro ministério | Revisão e regressões de autorização pendentes |
 | C01 | Em investigação | Edição de culto e inscrição usam bloqueios diferentes | Regressão concorrente PostgreSQL pendente |
 | E01 | Média | Exceções técnicas podem aparecer em respostas de comandos inválidos | Correção e testes pendentes |
@@ -127,6 +128,12 @@ a transação e as restrições são exercitadas em SQLite e PostgreSQL.
 o banco. `GET /health/ready` responde 200/ok ou 503/unavailable, sem detalhes
 de conexão e com Cache-Control: no-store. O timeout HTTP é
 `HEALTH_READY_TIMEOUT_SECONDS` (2 segundos, configurável entre 0.05 e 10).
+
+A CI do primeiro commit de health detectou supressão de logs após migrações
+programáticas (617 testes passaram e um falhou). A configuração do Alembic foi
+corrigida e recebeu regressões específicas; não se removeu a asserção de log.
+Quem incorpora Alembic e já configura logging pode usar
+`config.attributes["configure_logger"] = False` para preservar os handlers.
 
 A sondagem usa conexão independente e NullPool, sem alterar o pool da aplicação.
 PostgreSQL tem connect_timeout, statement_timeout, lock_timeout e transação
