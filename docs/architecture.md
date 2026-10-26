@@ -40,6 +40,12 @@ ordem de bloqueios. A fila não substitui a validação de capacidade no aceite.
 `scheduling.candidates` para priorizar elegíveis por carga e histórico. Mantém
 um convite pendente por pedido e tenta outra pessoa após recusa, expiração ou
 perda de elegibilidade. A troca só libera o original na transação do aceite.
+Aceites e trocas manuais bloqueiam original e substituto por ID crescente antes
+da vaga e do convite. Isso inclui o destinatário do aviso ao original: a chave
+estrangeira da outbox também participa dos bloqueios no PostgreSQL e não pode
+inverter a ordem usada pela busca de candidatos.
+Após aguardar esses bloqueios, a busca usa os estados relidos do banco e ignora
+convites já decididos; um aceite concorrente nunca é sobrescrito por cancelamento.
 `notifications.members` vincula avisos ao voluntário, com consentimento e telefone
 revalidados antes do transporte. `services.timing` centraliza identidade e horário
 UTC dos cultos; um horário civil inexistente exige revisão da coordenação.

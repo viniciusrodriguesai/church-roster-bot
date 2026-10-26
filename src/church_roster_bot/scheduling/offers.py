@@ -21,6 +21,7 @@ from church_roster_bot.scheduling.errors import NotAuthorized, RosterError
 from church_roster_bot.scheduling.invitations import create_invitation
 from church_roster_bot.scheduling.lifecycle import (
     audit,
+    lock_replacement_members,
     manual_replace,
     publish_schedule,
     schedule_for,
@@ -154,6 +155,10 @@ def respond_offer(
         original = db.get(AutomationInvitation, offer_id)
         if original is None or original.volunteer_id != volunteer_id:
             raise NotAuthorized("invitation not found for this volunteer")
+        if original.kind == "replacement":
+            # The original's notification inserts an FK to that member. Taking
+            # only the substitute here inverts discovery's sorted member locks.
+            lock_replacement_members(db, original.replacement_request_id, volunteer_id)
         member, slot = roster._lock_member_slot(db, volunteer_id, original.slot_id)
         offer = db.scalar(
             select(AutomationInvitation)

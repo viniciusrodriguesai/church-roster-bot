@@ -185,7 +185,9 @@ def test_two_terminals_accept_once_and_ignore_pasted_transcript(roster, monkeypa
             with condition:
                 waiting[phone] += 1
                 condition.notify_all()
-            value = inputs[phone].get(timeout=20)
+            # Real stdin stays idle indefinitely. The controller's bounded
+            # assertions and finally block own test timeouts and shutdown.
+            value = inputs[phone].get()
             if value is None:
                 raise EOFError
             return value

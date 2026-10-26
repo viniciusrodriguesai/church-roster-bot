@@ -123,6 +123,10 @@ def dispatch_replacements(
         )
     )
     for offer in offers:
+        # A decision can commit while discovery waits for its member locks.
+        # The refreshed row is authoritative; never cancel a completed offer.
+        if offer.status != "pending":
+            continue
         request = db.get(ReplacementRequest, offer.replacement_request_id)
         member = db.get(Volunteer, offer.volunteer_id)
         slot = db.get(Slot, offer.slot_id)

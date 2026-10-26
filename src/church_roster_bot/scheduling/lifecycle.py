@@ -130,6 +130,26 @@ def request_replacement(
     return request.id
 
 
+def lock_replacement_members(
+    db: Session, request_id: int, replacement_volunteer_id: int
+) -> tuple[ReplacementRequest, Assignment]:
+    """Lock both recipients by ID before any replacement slot or offer lock."""
+    request = db.get(ReplacementRequest, request_id)
+    if request is None:
+        raise NotFound("replacement request not found")
+    original = db.get(Assignment, request.assignment_id)
+    list(
+        db.scalars(
+            select(Volunteer)
+            .where(Volunteer.id.in_({original.volunteer_id, replacement_volunteer_id}))
+            .order_by(Volunteer.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    )
+    return request, original
+
+
 def manual_replace(
     db: Session,
     roster: RosterEngine,
@@ -150,11 +170,10 @@ def _manual_replace(
     *,
     now: datetime | None = None,
 ) -> int:
-    request = db.get(ReplacementRequest, request_id)
-    if request is None or request.status != "pending":
+    request, original = lock_replacement_members(db, request_id, replacement_volunteer_id)
+    if request.status != "pending":
         raise NotFound("pending replacement not found")
-    original = db.get(Assignment, request.assignment_id)
-    # Same order as automatic acceptance: member, slot, request, original.
+    # Same order as acceptance: both members, slot, offer (if any), request, original.
     member, slot = roster._lock_member_slot(db, replacement_volunteer_id, original.slot_id)
     request = db.get(ReplacementRequest, request_id, with_for_update=True, populate_existing=True)
     if request.status != "pending":
