@@ -1,11 +1,12 @@
 """Persistent deterministic conversation router shared by Meta and the simulator."""
 
+import logging
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from pydantic import ValidationError
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import Session
 
 from church_roster_bot.administration.conversation import AdminConversationMixin
@@ -51,6 +52,31 @@ from church_roster_bot.whatsapp.payloads import (
     list_payload,
     text_payload,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def parse_identifier(value: str) -> int:
+    """IDs use the common positive SQL INTEGER range on SQLite and PostgreSQL."""
+    if not value.isascii() or not value.isdecimal() or len(value) > 10:
+        raise RosterError("identificador inválido")
+    ident = int(value)
+    if not 1 <= ident <= 2**31 - 1:
+        raise RosterError("identificador inválido")
+    return ident
+
+
+def safe_error_detail(exc: Exception) -> str:
+    logger.info("command_rejected", extra={"error_type": type(exc).__name__})
+    if isinstance(exc, NoCapacity):
+        return "vaga lotada"
+    if isinstance(exc, MonthlyLimit):
+        return "limite mensal atingido"
+    if isinstance(exc, RosterError):
+        return str(exc)
+    if isinstance(exc, IntegrityError):
+        return "já existe um cadastro ou configuração com esses dados"
+    return "dados inválidos; confira o formato e os valores informados"
 
 
 def aware(value: datetime) -> datetime:
@@ -221,7 +247,7 @@ class Bot(AdminConversationMixin):
                     db,
                     self.roster,
                     volunteer.id,
-                    int(parts[1][1:]),
+                    parse_identifier(parts[1][1:]),
                     parts[0] == "ACEITAR",
                     self.config,
                 )
@@ -232,12 +258,15 @@ class Bot(AdminConversationMixin):
                     "cancelled": "Convite cancelado; a vaga ou sua elegibilidade mudou.",
                 }
                 self._text(db, phone, replies[decision.status])
-            except (ValueError, RosterError) as exc:
-                self._text(db, phone, f"Convite não aplicado: {exc}")
+            except (ValueError, DataError) as exc:
+                self._text(db, phone, f"Convite não aplicado: {safe_error_detail(exc)}")
             return
         if upper.startswith(("ACEITAR ", "RECUSAR ")) and volunteer:
             try:
-                request_id = int(upper.split()[1])
+                parts = upper.split()
+                if len(parts) != 2:
+                    raise RosterError("use ACEITAR <id> ou RECUSAR <id>")
+                request_id = parse_identifier(parts[1])
                 invitation = db.get(ThirdDayRequest, request_id)
                 assignment_id = self.roster.respond_third_day(
                     volunteer.id, request_id, upper.startswith("ACEITAR"), db=db
@@ -259,8 +288,8 @@ class Bot(AdminConversationMixin):
                     schedule = schedule_for(db, service.ministry_id, service.service_date)
                     if schedule and schedule.state == "published":
                         publish_schedule(db, service.ministry_id, service.service_date)
-            except (ValueError, RosterError) as exc:
-                self._text(db, phone, f"Convite não aplicado: {exc}")
+            except (ValueError, DataError) as exc:
+                self._text(db, phone, f"Convite não aplicado: {safe_error_detail(exc)}")
             return
         if (
             expired
@@ -297,7 +326,9 @@ class Bot(AdminConversationMixin):
                 if len(parts) != 2 or not parts[1].isdigit():
                     raise RosterError("use ESPERA <vaga_id> ou SAIR_ESPERA <posição_id>")
                 if parts[0] == "ESPERA":
-                    entry_id = join_waitlist(db, self.roster, volunteer.id, int(parts[1]))
+                    entry_id = join_waitlist(
+                        db, self.roster, volunteer.id, parse_identifier(parts[1])
+                    )
                     self._text(
                         db,
                         phone,
@@ -306,10 +337,12 @@ class Bot(AdminConversationMixin):
                         "Envie INICIAR para permitir os convites; o aceite será obrigatório.",
                     )
                 else:
-                    cancel_waitlist(db, self.roster, volunteer.id, int(parts[1]), self.config)
+                    cancel_waitlist(
+                        db, self.roster, volunteer.id, parse_identifier(parts[1]), self.config
+                    )
                     self._text(db, phone, "Saída da lista de espera registrada.")
-            except (ValueError, RosterError) as exc:
-                self._text(db, phone, f"Lista de espera não aplicada: {exc}")
+            except (ValueError, DataError) as exc:
+                self._text(db, phone, f"Lista de espera não aplicada: {safe_error_detail(exc)}")
             return
         if volunteer and upper == "MINHAESPERA":
             entries = db.scalars(
@@ -342,7 +375,7 @@ class Bot(AdminConversationMixin):
             return
         try:
             if session.state == "select_ministry":
-                ministry_id = int(text)
+                ministry_id = parse_identifier(text)
                 require_ministry(db, ministry_id, admin, coordinator)
                 self._state(session, "menu", ministry_id=ministry_id)
                 self._menu(db, session, admin, coordinator, volunteer)
@@ -371,15 +404,10 @@ class Bot(AdminConversationMixin):
             KeyError,
             IndexError,
             IntegrityError,
+            DataError,
+            OverflowError,
         ) as exc:
-            if isinstance(exc, NoCapacity):
-                detail = "vaga lotada"
-            elif isinstance(exc, MonthlyLimit):
-                detail = "limite mensal atingido"
-            elif isinstance(exc, IntegrityError):
-                detail = "já existe um cadastro ou configuração com esses dados"
-            else:
-                detail = str(exc)
+            detail = safe_error_detail(exc)
             self._text(
                 db, phone, f"Não foi possível concluir: {detail}. Envie MENU para recomeçar."
             )

@@ -18,7 +18,7 @@ def window_open(db: Session, phone: str) -> bool:
     last = session.last_inbound_at
     if last.tzinfo is None:
         last = last.replace(tzinfo=UTC)
-    return datetime.now(UTC) - last < timedelta(hours=24)
+    return timedelta(0) <= datetime.now(UTC) - last < timedelta(hours=24)
 
 
 def apply_window(db: Session, outgoing: OutboundMessage, config: Settings) -> None:

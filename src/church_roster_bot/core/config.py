@@ -5,7 +5,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    database_url: str = "postgresql+psycopg://roster:change-me@localhost:5432/roster"
+    database_url: str = Field(
+        default="postgresql+psycopg://roster:change-me@localhost:5432/roster", repr=False
+    )
     app_env: str = "development"
     whatsapp_access_token: SecretStr = SecretStr("")
     whatsapp_phone_number_id: str = ""
@@ -32,7 +34,7 @@ class Settings(BaseSettings):
             raise ValueError("WhatsApp API version must look like v25.0")
         return value
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", hide_input_in_errors=True)
 
 
 settings = Settings()

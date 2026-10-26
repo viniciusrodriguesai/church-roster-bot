@@ -43,8 +43,12 @@ worker, com transporte fictício. Não há nova fila externa ou painel administr
 | C01 | Alta | Edição de culto podia mudar a data entre validação e INSERT de inscrição, criando terceiro dia indevido | Corrigido: bloquear vagas ordenadas antes de reler culto/ocupação; regressão PostgreSQL com transações concorrentes |
 | C02 | Crítica para integridade | Cache ORM anterior ao bloqueio permitia aceitar membro desativado, ultrapassar capacidade ou usar data/escala antiga | Corrigido: reler voluntário, vaga, culto e mês depois de obter os bloqueios |
 | C03 | Média | Publicação podia renderizar versão anterior a uma inscrição concorrente; renomear pessoa não mudava o fingerprint de IDs | Corrigido: bloquear/reler mês antes de renderizar e comparar conteúdo além do fingerprint, preservando histórico |
-| E01 | Média | Exceções técnicas podem aparecer em respostas de comandos inválidos | Correção e testes pendentes |
-| R01 | Média | Indisponibilidade do banco durante recuperação inicial termina o worker | Revisão de recuperação pendente |
+| E01 | Média | Exceções técnicas e entradas maliciosas apareciam nas respostas; IDs gigantes podiam abortar transações | Corrigido: respostas seguras, IDs positivos compatíveis com INTEGER e rollback das operações inválidas |
+| R01 | Média | Indisponibilidade do banco durante recuperação inicial terminava o worker; falhas de infraestrutura consumiam tentativas do evento | Corrigido: retry da recuperação antes do ciclo e preservação do evento após rollback por indisponibilidade |
+| R02 | Média | Recibo failed tardio regredia read/delivered e código de erro copiava conteúdo arbitrário do provedor | Corrigido: ordem monotônica de evidências e códigos exclusivamente numéricos ou unknown |
+| R03 | Média | RuntimeError arbitrário no transporte era classificado como credencial ausente; resposta HTTP malformada perdia sua classificação | Corrigido: exceção específica antes do envio; demais resultados incertos ficam unknown; validar ID retornado e preservar HTTP 429 |
+| P01 | Média | Repr da configuração incluía senha na URL e validações exibiam valores de entrada | Corrigido: URL fora do repr e entradas ocultas na representação textual de erros Pydantic |
+| P02 | Média | Timestamp de entrada no futuro liberava janela livre de 24 horas | Corrigido: delta precisa ser não negativo e inferior a 24 horas |
 
 As gravidades descrevem impacto e condições de exploração; não são pontuações
 CVSS ou certificação. As correções são verificadas com casos que falham antes
@@ -118,6 +122,28 @@ primeira execução. Guardar as versões e os JSONs no relatório final.
 
 ## Falhas, segredos e riscos residuais
 
+- A recuperação inicial faz parte do ciclo protegido: indisponibilidade causa
+  log com classe da exceção e nova tentativa após cinco segundos. Nenhuma mensagem
+  é enviada antes da recuperação bem-sucedida. Uma falha DBAPI posterior exige
+  nova recuperação antes de continuar. Continuam sendo operações locais de um
+  único worker de produção, não uma eleição de líder distribuída.
+- Falha operacional do banco reverte a transação e preserva evento pending e
+  tentativas anteriores. Comandos defeituosos continuam tendo limite de tentativas;
+  não se converte indisponibilidade de infraestrutura em evento irrecuperável.
+- Prova de entrega/leitura prevalece sobre failed tardio. Failed prevalece sobre
+  sent tardio; delivered/read posteriores podem comprovar entrega e limpar o erro.
+  Só uma transição nova de falha gera notificação deduplicada.
+- Transporte registra apenas ID local, estado e código controlado. Erros inesperados
+  são ambíguos; somente CredentialsMissingError comprova ausência de tentativa de
+  envio. IDs vazios, não textuais ou maiores que a coluna tornam um sucesso HTTP
+  ambíguo. HTTP 429 continua com o limite existente de três tentativas.
+- Erros de parsing/validação retornam orientação genérica, preservando mensagens
+  de regras de negócio. Não incluir str(exc) de banco, validação ou parser no chat.
+  IDs globais são validados antes da consulta para evitar overflow e abortar a
+  transação PostgreSQL. Alterações administrativas inválidas revertem o savepoint.
+- Repr não é um mecanismo de armazenamento seguro: model_dump e errors() do
+  Pydantic podem conter dados de entrada. Não registrar esses objetos nem URLs;
+  os handlers usam somente classes de exceção e identificadores locais.
 - Resultado de transporte `unknown` não é reenviado automaticamente: a Meta pode
   já ter aceitado a mensagem. Repetir indiscriminadamente geraria duplicidade.
 - Produção continua com uma instância do worker conforme contrato atual;

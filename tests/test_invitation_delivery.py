@@ -16,7 +16,7 @@ from church_roster_bot.notifications.invitations import enqueue_invitation
 from church_roster_bot.notifications.worker import Worker
 from church_roster_bot.scheduling.models import Assignment, ThirdDayRequest
 from church_roster_bot.scripts.simulate import receive, simulate
-from church_roster_bot.whatsapp.client import MetaSendError
+from church_roster_bot.whatsapp.client import CredentialsMissingError, MetaSendError
 from church_roster_bot.whatsapp.models import InboundEvent, OutboundMessage
 from tests.test_phase2 import COORD, FIRST, SECOND, add, bodies, open_service
 
@@ -219,7 +219,7 @@ def test_window_is_rechecked_when_worker_claims_message(roster):
         (MetaSendError(429, "130429"), "failed", 3),
         (httpx.ReadTimeout("ambiguous"), "unknown", 1),
         (MetaSendError(200, "invalid_response"), "unknown", 1),
-        (RuntimeError("missing config"), "failed", 1),
+        (CredentialsMissingError("missing config"), "failed", 1),
     ],
 )
 def test_failure_or_uncertainty_notifies_coordinator_without_resend(

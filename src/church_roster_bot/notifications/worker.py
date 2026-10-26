@@ -5,6 +5,7 @@ import time
 
 import httpx
 from sqlalchemy import select
+from sqlalchemy.exc import DBAPIError, OperationalError
 
 from church_roster_bot.conversations.router import Bot
 from church_roster_bot.core.config import Settings, settings
@@ -21,7 +22,12 @@ from church_roster_bot.scheduling.offers import expire_offers
 from church_roster_bot.scheduling.reminders import enqueue_reminders
 from church_roster_bot.scheduling.replacements import dispatch_replacements
 from church_roster_bot.scheduling.waitlist import dispatch_waitlist
-from church_roster_bot.whatsapp.client import MetaSendError, WhatsAppClient
+from church_roster_bot.whatsapp.client import (
+    CredentialsMissingError,
+    MetaSendError,
+    WhatsAppClient,
+    provider_error_code,
+)
 from church_roster_bot.whatsapp.models import InboundEvent, OutboundMessage
 from church_roster_bot.whatsapp.payloads import parse_message
 
@@ -55,6 +61,12 @@ class Worker:
                 "inbound_processing_failed",
                 extra={"event_id": self._current_event_id, "error_type": type(exc).__name__},
             )
+            # Database outages are infrastructure failures, not poison commands.
+            # The business transaction has rolled back; retain the original receipt.
+            if isinstance(exc, OperationalError) or (
+                isinstance(exc, DBAPIError) and exc.connection_invalidated
+            ):
+                raise
             if self._current_event_id is not None:
                 with self.session_factory.begin() as db:
                     event = db.get(InboundEvent, self._current_event_id, with_for_update=True)
@@ -94,22 +106,23 @@ class Worker:
                 if outgoing:
                     status = event.payload.get("status")
                     if status in {"sent", "delivered", "read", "failed"}:
-                        rank = {"sent": 1, "delivered": 2, "read": 3}
-                        if status == "failed" or rank.get(status, 0) >= rank.get(
-                            outgoing.status, 0
-                        ):
+                        # Delivery/read proof wins over a late failure. A late
+                        # "sent" receipt cannot erase a recorded delivery failure.
+                        rank = {"sent": 1, "failed": 2, "delivered": 3, "read": 4}
+                        if rank[status] > rank.get(outgoing.status, 0):
                             outgoing.status = status
-                        if status == "failed":
-                            errors = event.payload.get("errors")
-                            first_error = (
-                                errors[0]
-                                if isinstance(errors, list)
-                                and errors
-                                and isinstance(errors[0], dict)
-                                else {}
-                            )
-                            outgoing.error_code = str(first_error.get("code", "unknown"))[:64]
-                            self._notify_delivery(db, outgoing)
+                            outgoing.error_code = None
+                            if status == "failed":
+                                errors = event.payload.get("errors")
+                                first_error = (
+                                    errors[0]
+                                    if isinstance(errors, list)
+                                    and errors
+                                    and isinstance(errors[0], dict)
+                                    else {}
+                                )
+                                outgoing.error_code = provider_error_code(first_error.get("code"))
+                                self._notify_delivery(db, outgoing)
                 event.status = "processed"
             else:
                 event.status = "ignored"
@@ -168,10 +181,16 @@ class Worker:
                 status = "pending"
         except (httpx.TimeoutException, httpx.TransportError):
             status, error = "unknown", "network_ambiguous"
-        except RuntimeError:
+        except CredentialsMissingError:
             status, error = "failed", "credentials_missing"
         except Exception as exc:
             status, error = "unknown", type(exc).__name__[:64]
+
+        if status != "sent":
+            logger.warning(
+                "outbound_attempt_failed",
+                extra={"outgoing_id": outgoing_id, "delivery_status": status, "error_code": error},
+            )
 
         def record_result() -> None:
             with self.session_factory.begin() as db:
@@ -222,9 +241,12 @@ class Worker:
                 self._notify_delivery(db, outgoing)
 
     def run_forever(self, interval: float = 1.0) -> None:
-        self.recover_sending()
+        recovery_needed = True
         while True:
             try:
+                if recovery_needed:
+                    self.recover_sending()
+                    recovery_needed = False
                 progressed = self.maintain()
                 progressed = self.process_one() or progressed
                 progressed = self.send_one() or progressed
@@ -232,6 +254,10 @@ class Worker:
                     time.sleep(interval)
             except Exception as exc:
                 logger.error("worker_cycle_failed", extra={"error_type": type(exc).__name__})
+                if isinstance(exc, DBAPIError):
+                    # A transport may have succeeded before its receipt failed.
+                    # Reconcile durable claims before any new external send.
+                    recovery_needed = True
                 time.sleep(5)
 
     def maintain(self) -> bool:
