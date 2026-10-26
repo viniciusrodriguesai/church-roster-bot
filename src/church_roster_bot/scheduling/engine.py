@@ -235,7 +235,7 @@ class RosterEngine:
             )
         with self._transaction(db) as db:
             member, slot = self._lock_member_slot(db, volunteer_id, slot_id)
-            coordinator = db.get(Coordinator, coordinator_id)
+            coordinator = db.get(Coordinator, coordinator_id, populate_existing=True)
             if (
                 coordinator is None
                 or not coordinator.active
@@ -385,12 +385,25 @@ class RosterEngine:
 
     def _lock_member_slot(self, db: Session, volunteer_id: int, slot_id: int):
         # The lock order is consistent across registration and exception acceptance.
-        member = db.get(Volunteer, volunteer_id, with_for_update=True)
+        member = db.get(Volunteer, volunteer_id, with_for_update=True, populate_existing=True)
         if member is None or not member.active:
             raise NotFound("active volunteer not found")
-        slot = db.get(Slot, slot_id, with_for_update=True)
+        slot = db.get(Slot, slot_id, with_for_update=True, populate_existing=True)
         if slot is None:
             raise NotFound("slot not found")
+        # Conversation routing may have loaded these objects before a lock wait.
+        # Authoritative validation must observe the state after that wait.
+        service = db.get(WorshipService, slot.service_id, populate_existing=True)
+        db.scalar(
+            select(MonthlySchedule)
+            .where(
+                MonthlySchedule.ministry_id == service.ministry_id,
+                MonthlySchedule.year == service.service_date.year,
+                MonthlySchedule.month == service.service_date.month,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
         return member, slot
 
     def _assign_locked(

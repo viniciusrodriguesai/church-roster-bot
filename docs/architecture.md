@@ -90,6 +90,7 @@ A fronteira de entrada do terminal filtra transcrições antes de criar eventos:
 - Terceiro dia só com solicitação de coordenador autorizado, justificativa e aceite do voluntário. O aceite revalida regras e vagas.
 - Abertura/fechamento e ofertas são incompatíveis no mesmo culto; pares de conflitos são configuráveis.
 - Inscrição bloqueia voluntário e vaga nessa ordem. Capacidade da vaga e índice parcial protegem contra duplicidade.
+- A confirmação relê os objetos após os bloqueios e bloqueia o mês antes de validar seu estado; publicar relê o mesmo mês antes de compor a versão. A edição de culto bloqueia suas vagas antes de mudar data/horário. Campos globais de voluntário compartilhado exigem autorização para todos os ministérios afetados; funções permanecem locais. Troca de telefone exige novo consentimento.
 - Indisponibilidade impede novas inscrições; se atingir uma inscrição, abre pedido de substituição sem apagar o responsável.
 
 ## Estados e versões

@@ -38,8 +38,11 @@ worker, com transporte fictício. Não há nova fila externa ou painel administr
 | S04 | Média | Truncamento do identificador de status colidia entre recibos diferentes | Corrigido: hash da identidade completa quando excede a coluna; IDs curtos preservados |
 | D01 | Alta no ambiente de instalação | pip 25.0.1 incluído na imagem de teste tem alertas de extração/instalação de pacotes | Bootstrap da CI exige pip >=26.2.2; repetir auditoria do ambiente atualizado |
 | L01 | Média | Migrações programáticas desativavam loggers da aplicação, suprimindo diagnóstico de falhas | Corrigido: preservar loggers; opção de manter configuração de logging do chamador; engine descartado em finally |
-| A01 | Em investigação | Campos globais de voluntário compartilhado podem afetar outro ministério | Revisão e regressões de autorização pendentes |
-| C01 | Em investigação | Edição de culto e inscrição usam bloqueios diferentes | Regressão concorrente PostgreSQL pendente |
+| A01 | Alta | Coordenador parcial podia trocar telefone, nome ou atividade de voluntário compartilhado, afetando sua identidade em outro ministério | Corrigido: conferir autoridade atual e todos os ministérios afetados; funções continuam locais |
+| A02 | Alta | Novo telefone herdava consentimento concedido ao número antigo | Corrigido: mudança real de telefone desativa notificações até INICIAR do novo número |
+| C01 | Alta | Edição de culto podia mudar a data entre validação e INSERT de inscrição, criando terceiro dia indevido | Corrigido: bloquear vagas ordenadas antes de reler culto/ocupação; regressão PostgreSQL com transações concorrentes |
+| C02 | Crítica para integridade | Cache ORM anterior ao bloqueio permitia aceitar membro desativado, ultrapassar capacidade ou usar data/escala antiga | Corrigido: reler voluntário, vaga, culto e mês depois de obter os bloqueios |
+| C03 | Média | Publicação podia renderizar versão anterior a uma inscrição concorrente; renomear pessoa não mudava o fingerprint de IDs | Corrigido: bloquear/reler mês antes de renderizar e comparar conteúdo além do fingerprint, preservando histórico |
 | E01 | Média | Exceções técnicas podem aparecer em respostas de comandos inválidos | Correção e testes pendentes |
 | R01 | Média | Indisponibilidade do banco durante recuperação inicial termina o worker | Revisão de recuperação pendente |
 
@@ -72,6 +75,37 @@ O rate limit por telefone continua persistido em ConversationSession, sob
 bloqueio, antes de executar comandos. Isso não é um limite global de conexões
 HTTP: limites de conexão, cabeçalhos, TLS e rate limit na borda são requisitos
 da futura implantação, sem criar infraestrutura nesta etapa.
+
+## Autorização e consistência administrativa
+
+`edit_volunteer` e `edit_service` verificam ator ativo e ministério no limite do
+serviço e reavaliam após esperas por bloqueios. Um coordenador só altera campos
+globais de uma pessoa compartilhada se tiver concessões atuais em todos os
+ministérios dela; o administrador geral da igreja mantém esse gerenciamento.
+A edição de funções permanece limitada ao ministério selecionado e preserva
+permissões dos outros. O motivo de recusa não revela nomes dos outros ministérios.
+
+Trocar telefone desativa o consentimento herdado; manter o mesmo telefone preserva
+o consentimento existente. A confirmação pelo WhatsApp instrui o novo número a
+enviar INICIAR. Não se transfere silenciosamente autorização de envio entre números.
+
+Claims usam voluntário → vaga → mês. Os objetos já carregados pela conversa são
+relidos após os bloqueios; o culto é atualizado no identity map depois do lock da
+vaga. Estado do coordenador também é relido ao autorizar terceiro dia. A edição
+de culto bloqueia suas vagas por ID e relê o serviço antes de verificar ocupação.
+Uma mudança simultânea não transforma uma inscrição validada para um dia já
+ocupado em um terceiro dia indevido.
+
+Publicação bloqueia/recarrega o mês antes de compor sua versão, serializando com
+claims. Uma mudança de nome pode gerar nova versão mesmo com os mesmos IDs.
+Versões anteriores não são sobrescritas. Uma versão é um retrato publicado;
+alterações administrativas posteriores devem ser revisadas e republicadas.
+
+As regressões usam duas sessões com referências antigas reais, tentativas de
+tomada de telefone pelo fluxo de conversa e transações PostgreSQL coordenadas
+por gates e observação de lock waits. A bateria inicial reproduziu 24 falhas;
+as correções são avaliadas junto às regressões anteriores de concorrência e
+substituições. Nenhum dado real ou banco original participa dessas operações.
 
 O primeiro pip-audit encontrou 12 registros relativos ao pip 25.0.1 da imagem
 de teste, representando seis IDs de advisory distintos, com entradas duplicadas

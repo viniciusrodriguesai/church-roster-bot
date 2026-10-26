@@ -88,8 +88,10 @@ def edit_volunteer(
     actor_type: str,
     actor_id: int,
 ) -> None:
-    ministry = db.get(Ministry, ministry_id)
-    member = db.get(Volunteer, volunteer_id, with_for_update=True)
+    ministry = authorize_actor(db, ministry_id, actor_type, actor_id)
+    member = db.get(Volunteer, volunteer_id, with_for_update=True, populate_existing=True)
+    # Permissions can be revoked while this operation waits for the member.
+    authorize_actor(db, ministry_id, actor_type, actor_id)
     if member is None or member.church_id != ministry.church_id:
         raise NotFound("volunteer not found in this church")
     if (
@@ -101,13 +103,43 @@ def edit_volunteer(
         is None
     ):
         raise NotAuthorized("volunteer is not in this ministry")
+    if field in {"name", "phone", "active"} and actor_type != "admin":
+        affected = set(
+            db.scalars(
+                select(Role.ministry_id)
+                .join(VolunteerRole, VolunteerRole.role_id == Role.id)
+                .where(VolunteerRole.volunteer_id == member.id)
+            )
+        )
+        granted = set(
+            db.scalars(
+                select(CoordinatorMinistry.ministry_id)
+                .join(Coordinator, Coordinator.id == CoordinatorMinistry.coordinator_id)
+                .join(Ministry, Ministry.id == CoordinatorMinistry.ministry_id)
+                .where(
+                    Coordinator.id == actor_id,
+                    Coordinator.active.is_(True),
+                    Ministry.church_id == ministry.church_id,
+                )
+            )
+        )
+        if not affected <= granted:
+            raise NotAuthorized(
+                "alteração global exige autorização em todos os ministérios do voluntário; "
+                "fale com o administrador geral"
+            )
     if field == "name":
         if not value.strip() or len(value) > 160:
             raise RosterError("invalid name")
         member.name = value.strip()
     elif field == "phone":
-        member.phone_e164 = normalize_phone(value)
+        phone = normalize_phone(value)
+        if phone != member.phone_e164:
+            member.phone_e164 = phone
+            member.invite_opt_in = False
     elif field == "active":
+        if value not in {"true", "false"}:
+            raise RosterError("use true ou false para atividade")
         member.active = value == "true"
     elif field == "roles":
         role_ids = {int(v.strip()) for v in value.split(",")}
@@ -273,9 +305,23 @@ def edit_service(
     actor_type: str,
     actor_id: int,
 ) -> None:
-    service = db.get(WorshipService, service_id, with_for_update=True)
+    authorize_actor(db, ministry_id, actor_type, actor_id)
+    service = db.get(WorshipService, service_id)
     if service is None or service.ministry_id != ministry_id:
         raise NotAuthorized("service is outside the authorized ministry")
+    # Claims hold slots while validating the date and monthly limit. Lock the
+    # same rows before checking occupancy, then re-read the protected service.
+    list(
+        db.scalars(
+            select(Slot)
+            .where(Slot.service_id == service_id)
+            .order_by(Slot.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    )
+    service = db.get(WorshipService, service_id, with_for_update=True, populate_existing=True)
+    authorize_actor(db, ministry_id, actor_type, actor_id)
     schedule = schedule_for(db, ministry_id, service.service_date)
     if schedule and schedule.state in {"published", "closed", "cancelled"}:
         raise RosterError("published or closed service cannot be moved")

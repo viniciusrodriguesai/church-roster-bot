@@ -255,6 +255,12 @@ def invitation_text(db: Session, invitation: ThirdDayRequest) -> str:
 
 def publish_schedule(db: Session, ministry_id: int, day: date) -> ScheduleVersion:
     schedule = schedule_for(db, ministry_id, day, create=True)
+    schedule = db.scalar(
+        select(MonthlySchedule)
+        .where(MonthlySchedule.id == schedule.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     if schedule.state not in {"open", "under_review", "published"}:
         raise RosterError("schedule is not ready for publication")
     content = format_schedule(db, ministry_id, day)
@@ -285,7 +291,7 @@ def publish_schedule(db: Session, ministry_id: int, day: date) -> ScheduleVersio
         .order_by(ScheduleVersion.version.desc())
         .limit(1)
     )
-    if previous and previous.fingerprint == fingerprint:
+    if previous and previous.fingerprint == fingerprint and previous.content == content:
         return previous
     if schedule.state != "published":
         transition_schedule(schedule, "published")

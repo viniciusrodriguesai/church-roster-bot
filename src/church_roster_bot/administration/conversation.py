@@ -457,7 +457,16 @@ class AdminConversationMixin:
                     actor_type,
                     actor_id,
                 )
-                self._text(db, phone, "Cadastro atualizado.")
+                member = db.get(Volunteer, data["volunteer_id"])
+                if data["edit_field"] == "phone" and not member.invite_opt_in:
+                    self._text(
+                        db,
+                        phone,
+                        "Cadastro atualizado. O número cadastrado precisa enviar INICIAR "
+                        "para permitir notificações.",
+                    )
+                else:
+                    self._text(db, phone, "Cadastro atualizado.")
             else:
                 self._text(db, phone, "Alteração descartada.")
             self._state(session, "admin_members")
