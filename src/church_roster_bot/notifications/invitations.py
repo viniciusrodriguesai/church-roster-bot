@@ -6,7 +6,8 @@ from sqlalchemy.orm import Session
 from church_roster_bot.core.config import Settings
 from church_roster_bot.members.models import Coordinator, Volunteer
 from church_roster_bot.ministries.models import Role
-from church_roster_bot.notifications.outbox import apply_window, window_open
+from church_roster_bot.notifications.coordinators import prepare_coordinator_notice
+from church_roster_bot.notifications.outbox import window_open
 from church_roster_bot.scheduling.lifecycle import invitation_text
 from church_roster_bot.scheduling.models import ThirdDayRequest
 from church_roster_bot.services.models import Slot, WorshipService
@@ -46,10 +47,16 @@ def notify_coordinator(
         body = f"{member.name}: {detail}\n{label}."
     if error:
         body += f" Código: {error}."
+    slot = db.get(Slot, invitation.slot_id)
+    service = db.get(WorshipService, slot.service_id)
     outgoing = OutboundMessage(
-        recipient_e164=coordinator.phone_e164, payload=text_payload(body), dedupe_key=key
+        recipient_e164=coordinator.phone_e164,
+        coordinator_id=coordinator.id,
+        notice_ministry_id=service.ministry_id,
+        payload=text_payload(body),
+        dedupe_key=key,
     )
-    apply_window(db, outgoing, config)
+    prepare_coordinator_notice(db, outgoing, config)
     db.add(outgoing)
 
 

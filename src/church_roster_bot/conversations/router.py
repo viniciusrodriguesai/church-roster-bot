@@ -17,14 +17,10 @@ from church_roster_bot.administration.service import (
 )
 from church_roster_bot.conversations.models import ConversationSession
 from church_roster_bot.core.config import Settings
-from church_roster_bot.members.models import (
-    Coordinator,
-    CoordinatorMinistry,
-    Volunteer,
-    VolunteerRole,
-)
+from church_roster_bot.members.models import Volunteer, VolunteerRole
 from church_roster_bot.ministries.models import Church, Ministry, Role
 from church_roster_bot.notifications.automation import activate_offers
+from church_roster_bot.notifications.coordinators import notify_ministry
 from church_roster_bot.notifications.invitations import activate_invitations, notify_coordinator
 from church_roster_bot.notifications.members import activate_member_notices
 from church_roster_bot.notifications.outbox import apply_window
@@ -539,24 +535,14 @@ class Bot(AdminConversationMixin):
             )
             slot = db.get(Slot, db.get(Assignment, session.data["assignment_id"]).slot_id)
             service = db.get(WorshipService, slot.service_id)
-            for coordinator in db.scalars(
-                select(Coordinator)
-                .join(CoordinatorMinistry, CoordinatorMinistry.coordinator_id == Coordinator.id)
-                .where(
-                    Coordinator.church_id == member.church_id,
-                    CoordinatorMinistry.ministry_id == service.ministry_id,
-                    Coordinator.active.is_(True),
-                )
-            ).all():
-                self._send(
-                    db,
-                    coordinator.phone_e164,
-                    text_payload(
-                        f"Substituição pendente #{request_id} "
-                        f"em {service.service_date:%d/%m}. Consulte MENU."
-                    ),
-                    proactive=True,
-                )
+            notify_ministry(
+                db,
+                service.ministry_id,
+                f"replacement:{request_id}:requested",
+                f"Substituição pendente #{request_id} "
+                f"em {service.service_date:%d/%m}. Consulte MENU.",
+                self.config,
+            )
         else:
             self._menu(db, session, None, None, member)
 

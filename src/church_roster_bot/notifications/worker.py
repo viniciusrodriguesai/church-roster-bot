@@ -11,6 +11,7 @@ from church_roster_bot.conversations.router import Bot
 from church_roster_bot.core.config import Settings, settings
 from church_roster_bot.core.database import SessionLocal, is_sqlite_busy, retry_sqlite_transaction
 from church_roster_bot.notifications.automation import notify_offer, prepare_offer
+from church_roster_bot.notifications.coordinators import prepare_coordinator_notice
 from church_roster_bot.notifications.invitations import notify_coordinator, prepare_invitation
 from church_roster_bot.notifications.members import prepare_member_notice
 from church_roster_bot.notifications.outbox import apply_window
@@ -142,7 +143,9 @@ class Worker:
             )
             if outgoing is None:
                 return False, None
-            if outgoing.automation_invitation_id:
+            if outgoing.coordinator_id is not None or outgoing.notice_ministry_id is not None:
+                prepare_coordinator_notice(db, outgoing, self.config)
+            elif outgoing.automation_invitation_id:
                 prepare_offer(db, outgoing, self.config)
             elif outgoing.invitation_id:
                 prepare_invitation(db, outgoing, self.config)
@@ -150,6 +153,10 @@ class Worker:
                 prepare_reminder(db, outgoing, self.config)
             elif outgoing.volunteer_id:
                 prepare_member_notice(db, outgoing, self.config)
+            elif outgoing.dedupe_key is not None:
+                # Legacy proactive notices have no provable recipient authority.
+                # Preserve their payload/history; require a fresh authorized action.
+                outgoing.status, outgoing.error_code = "cancelled", "notice_scope_required"
             else:
                 apply_window(db, outgoing, self.config)
             if outgoing.status != "pending":

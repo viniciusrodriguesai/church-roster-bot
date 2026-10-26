@@ -26,6 +26,7 @@ from church_roster_bot.members.models import Coordinator, Volunteer, VolunteerRo
 from church_roster_bot.members.schemas import VolunteerCreate
 from church_roster_bot.ministries.models import Role
 from church_roster_bot.notifications.invitations import DELIVERY_LABELS, enqueue_invitation
+from church_roster_bot.notifications.members import member_notice
 from church_roster_bot.scheduling.automation import configure_opening
 from church_roster_bot.scheduling.distribution import DistributionPlanner
 from church_roster_bot.scheduling.emergencies import configure_emergencies
@@ -53,7 +54,7 @@ from church_roster_bot.scheduling.reminders import configure_reminders
 from church_roster_bot.scheduling.reports import audit_history, monthly_report
 from church_roster_bot.services.models import Slot, WorshipService
 from church_roster_bot.whatsapp.models import OutboundMessage
-from church_roster_bot.whatsapp.payloads import buttons_payload, normalize_phone, text_payload
+from church_roster_bot.whatsapp.payloads import buttons_payload, normalize_phone
 
 
 class AdminConversationMixin:
@@ -765,17 +766,14 @@ class AdminConversationMixin:
                 slot = db.get(Slot, original.slot_id)
                 service = db.get(WorshipService, slot.service_id)
                 for volunteer_id in (original.volunteer_id, data["member_id"]):
-                    member = db.get(Volunteer, volunteer_id)
-                    if member.invite_opt_in:
-                        self._send(
-                            db,
-                            member.phone_e164,
-                            text_payload(
-                                f"Substituição confirmada para {service.service_date:%d/%m/%Y} "
-                                f"às {service.start_time:%H:%M}. Consulte sua escala pelo MENU."
-                            ),
-                            proactive=True,
-                        )
+                    member_notice(
+                        db,
+                        volunteer_id,
+                        f"manual-replacement:{request.id}:fulfilled",
+                        f"Substituição confirmada para {service.service_date:%d/%m/%Y} "
+                        f"às {service.start_time:%H:%M}. Consulte sua escala pelo MENU.",
+                        self.config,
+                    )
                 schedule = schedule_for(db, ministry.id, service.service_date)
                 if schedule and schedule.state == "published":
                     version = db.scalar(

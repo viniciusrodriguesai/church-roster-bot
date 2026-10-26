@@ -40,6 +40,7 @@ worker, com transporte fictício. Não há nova fila externa ou painel administr
 | L01 | Média | Migrações programáticas desativavam loggers da aplicação, suprimindo diagnóstico de falhas | Corrigido: preservar loggers; opção de manter configuração de logging do chamador; engine descartado em finally |
 | A01 | Alta | Coordenador parcial podia trocar telefone, nome ou atividade de voluntário compartilhado, afetando sua identidade em outro ministério | Corrigido: conferir autoridade atual e todos os ministérios afetados; funções continuam locais |
 | A02 | Alta | Novo telefone herdava consentimento concedido ao número antigo | Corrigido: mudança real de telefone desativa notificações até INICIAR do novo número |
+| A03 | Alta | Avisos enfileirados continuavam indo ao telefone antigo ou a coordenador desativado/sem concessão; avisos de exceção não conferiam escopo atual | Corrigido: identidade e ministério no aviso, revalidação no claim e cancelamento seguro quando não há contexto comprovado |
 | C01 | Alta | Edição de culto podia mudar a data entre validação e INSERT de inscrição, criando terceiro dia indevido | Corrigido: bloquear vagas ordenadas antes de reler culto/ocupação; regressão PostgreSQL com transações concorrentes |
 | C02 | Crítica para integridade | Cache ORM anterior ao bloqueio permitia aceitar membro desativado, ultrapassar capacidade ou usar data/escala antiga | Corrigido: reler voluntário, vaga, culto e mês depois de obter os bloqueios |
 | C03 | Média | Publicação podia renderizar versão anterior a uma inscrição concorrente; renomear pessoa não mudava o fingerprint de IDs | Corrigido: bloquear/reler mês antes de renderizar e comparar conteúdo além do fingerprint, preservando histórico |
@@ -110,6 +111,24 @@ tomada de telefone pelo fluxo de conversa e transações PostgreSQL coordenadas
 por gates e observação de lock waits. A bateria inicial reproduziu 24 falhas;
 as correções são avaliadas junto às regressões anteriores de concorrência e
 substituições. Nenhum dado real ou banco original participa dessas operações.
+
+Avisos à coordenação guardam coordinator_id e notice_ministry_id na outbox.
+O claim confere atividade, igreja, concessão do ministério e telefone atual antes
+do transporte. A mesma verificação é aplicada ao aviso excepcional legado ao
+enfileirar. Revogar acesso ou trocar telefone antes do claim cancela o aviso,
+sem encaminhá-lo silenciosamente ao número novo. A autorização não é mantida
+por transação aberta durante uma chamada HTTP externa; mudanças após o claim
+têm a mesma limitação temporal de outros envios já iniciados.
+
+A migração 331c6a8e4509 adiciona duas colunas opcionais e suas chaves estrangeiras;
+upgrade/downgrade preservam mensagens e conteúdo anteriores. Não infere autoridade
+a partir de um telefone ou do texto do aviso. Um aviso proativo legado com chave
+de deduplicação, sem vínculo de convite/voluntário nem escopo comprovável, é
+preservado e cancelado no claim com notice_scope_required. Uma nova ação autorizada
+deve gerar o aviso atual; não reenviar manualmente o conteúdo antigo sem revisão.
+Respostas diretas de conversas mantêm a autorização verificada ao processar o
+comando. Alertas novos de substituição usam os helpers existentes de coordenação
+e de membro, incluindo deduplicação, consentimento e conferência de destinatário.
 
 O primeiro pip-audit encontrou 12 registros relativos ao pip 25.0.1 da imagem
 de teste, representando seis IDs de advisory distintos, com entradas duplicadas

@@ -33,6 +33,8 @@ class OutboundMessage(Base):
         ForeignKey("automation_invitations.id"), unique=True
     )
     volunteer_id: Mapped[int | None] = mapped_column(ForeignKey("volunteers.id"), nullable=True)
+    coordinator_id: Mapped[int | None] = mapped_column(ForeignKey("coordinators.id"))
+    notice_ministry_id: Mapped[int | None] = mapped_column(ForeignKey("ministries.id"))
     reminder_assignment_id: Mapped[int | None] = mapped_column(
         ForeignKey("assignments.id"), unique=True
     )
