@@ -1,5 +1,7 @@
 """Validate the Meta envelope and extract only supported inbound event shapes."""
 
+import hashlib
+import json
 import re
 from dataclasses import dataclass
 
@@ -7,18 +9,18 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class Change(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="allow", strict=True)
     field: str
     value: dict
 
 
 class Entry(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="allow", strict=True)
     changes: list[Change] = Field(max_length=100)
 
 
 class WebhookEnvelope(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="allow", strict=True)
     object: str
     entry: list[Entry] = Field(max_length=100)
 
@@ -32,8 +34,10 @@ class IncomingMessage:
 
 
 def normalize_phone(raw: str) -> str:
+    if not isinstance(raw, str):
+        raise ValueError("invalid E.164 phone")
     phone = raw if raw.startswith("+") else f"+{raw}"
-    if not re.fullmatch(r"\+[1-9]\d{7,14}", phone):
+    if not re.fullmatch(r"\+[1-9][0-9]{7,14}", phone):
         raise ValueError("invalid E.164 phone")
     return phone
 
@@ -68,6 +72,75 @@ def parse_message(value: dict) -> IncomingMessage | None:
     if not isinstance(text, str) or not text.strip() or len(text) > 4096:
         return None
     return IncomingMessage(value["id"], phone, text.strip(), kind)
+
+
+@dataclass(frozen=True)
+class InboundDraft:
+    event_id: str
+    kind: str
+    payload: dict
+
+
+def webhook_events(
+    envelope: WebhookEnvelope, phone_number_id: str, max_events: int
+) -> list[InboundDraft]:
+    """Validate the entire bounded batch before opening a storage transaction."""
+    drafts = []
+    for entry in envelope.entry:
+        for change in entry.changes:
+            if change.field != "messages":
+                continue
+            value = change.value
+            metadata = value.get("metadata")
+            if phone_number_id and (
+                not isinstance(metadata, dict) or metadata.get("phone_number_id") != phone_number_id
+            ):
+                continue
+            for kind, key in (("message", "messages"), ("status", "statuses")):
+                items = value.get(key, [])
+                if not isinstance(items, list):
+                    raise ValueError("invalid event collection")
+                for item in items:
+                    if len(drafts) >= max_events:
+                        raise OverflowError("event budget exceeded")
+                    if not isinstance(item, dict):
+                        raise ValueError("invalid event")
+                    ident = item.get("id")
+                    if not isinstance(ident, str) or not 1 <= len(ident) <= 1024:
+                        raise ValueError("invalid event identity")
+                    if kind == "message":
+                        normalize_phone(item.get("from"))
+                        message_type = item.get("type")
+                        if not isinstance(message_type, str) or not 1 <= len(message_type) <= 32:
+                            raise ValueError("invalid message type")
+                        if message_type in {"text", "interactive", "button"} and not parse_message(
+                            item
+                        ):
+                            raise ValueError("invalid message content")
+                    else:
+                        status, timestamp = item.get("status"), item.get("timestamp", "")
+                        if not isinstance(status, str) or not 1 <= len(status) <= 32:
+                            raise ValueError("invalid status")
+                        if not isinstance(timestamp, str) or len(timestamp) > 20:
+                            raise ValueError("invalid status timestamp")
+                        errors = item.get("errors", [])
+                        if not isinstance(errors, list) or any(
+                            not isinstance(e, dict) for e in errors
+                        ):
+                            raise ValueError("invalid delivery errors")
+                    # Preserve existing short identities. Hash long message IDs
+                    # as before, and hash complete status identities rather than
+                    # silently truncating distinct timestamps/statuses together.
+                    if len(ident) > 240:
+                        ident = hashlib.sha256(
+                            json.dumps(item, sort_keys=True).encode()
+                        ).hexdigest()
+                    if kind == "status":
+                        ident = f"{ident}:{item['status']}:{item.get('timestamp', '')}"
+                    if len(ident) > 255:
+                        ident = "status:" + hashlib.sha256(ident.encode()).hexdigest()
+                    drafts.append(InboundDraft(ident, kind, item))
+    return drafts
 
 
 def text_payload(body: str) -> dict:

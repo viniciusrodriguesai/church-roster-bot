@@ -1,18 +1,29 @@
 """Small HTTP surface: health and authenticated Meta webhooks only."""
 
+import asyncio
 import hashlib
 import hmac
 import json
+import logging
+import re
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 from pydantic import ValidationError
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError
+from starlette.concurrency import run_in_threadpool
+from starlette.requests import ClientDisconnect
 
 from church_roster_bot.core.config import Settings, settings
 from church_roster_bot.core.database import SessionLocal
-from church_roster_bot.whatsapp.models import InboundEvent
-from church_roster_bot.whatsapp.payloads import WebhookEnvelope
+from church_roster_bot.whatsapp.inbox import store_events
+from church_roster_bot.whatsapp.payloads import WebhookEnvelope, webhook_events
+
+logger = logging.getLogger(__name__)
+
+
+def reject_json_constant(value: str):
+    raise ValueError("non-finite JSON value")
 
 
 def create_app(session_factory=SessionLocal, config: Settings = settings) -> FastAPI:
@@ -30,7 +41,7 @@ def create_app(session_factory=SessionLocal, config: Settings = settings) -> Fas
         if (
             not configured
             or query.get("hub.mode") != "subscribe"
-            or not hmac.compare_digest(received, configured)
+            or not hmac.compare_digest(received.encode(), configured.encode())
         ):
             raise HTTPException(status_code=403, detail="verification failed")
         challenge = query.get("hub.challenge")
@@ -43,64 +54,48 @@ def create_app(session_factory=SessionLocal, config: Settings = settings) -> Fas
         secret = config.meta_app_secret.get_secret_value()
         if not secret:
             raise HTTPException(status_code=503, detail="webhook secret is not configured")
-        raw = await request.body()
-        if len(raw) > config.webhook_max_bytes:
-            raise HTTPException(status_code=413, detail="webhook too large")
         signature = request.headers.get("X-Hub-Signature-256", "")
+        if not re.fullmatch(r"sha256=[0-9a-f]{64}", signature):
+            raise HTTPException(status_code=403, detail="invalid signature")
+        length = request.headers.get("content-length")
+        if length is not None:
+            if not re.fullmatch(r"[0-9]{1,20}", length):
+                raise HTTPException(status_code=400, detail="invalid content length")
+            if int(length) > config.webhook_max_bytes:
+                raise HTTPException(status_code=413, detail="webhook too large")
+        raw = bytearray()
+        try:
+            async with asyncio.timeout(config.webhook_read_timeout_seconds):
+                async for chunk in request.stream():
+                    if len(raw) + len(chunk) > config.webhook_max_bytes:
+                        raise HTTPException(status_code=413, detail="webhook too large")
+                    raw.extend(chunk)
+        except TimeoutError as exc:
+            raise HTTPException(status_code=408, detail="webhook read timed out") from exc
+        except ClientDisconnect as exc:
+            raise HTTPException(status_code=400, detail="incomplete webhook") from exc
         expected = "sha256=" + hmac.new(secret.encode(), raw, hashlib.sha256).hexdigest()
         if not hmac.compare_digest(signature, expected):
             raise HTTPException(status_code=403, detail="invalid signature")
         try:
-            envelope = WebhookEnvelope.model_validate_json(raw)
-        except ValidationError as exc:
+            payload = json.loads(raw, parse_constant=reject_json_constant)
+            envelope = WebhookEnvelope.model_validate(payload)
+        except (ValidationError, ValueError, UnicodeDecodeError, RecursionError) as exc:
             raise HTTPException(status_code=400, detail="invalid webhook payload") from exc
         if envelope.object != "whatsapp_business_account":
             raise HTTPException(status_code=400, detail="unexpected webhook object")
-        accepted = 0
         try:
-            with session_factory.begin() as db:
-                for entry in envelope.entry:
-                    for change in entry.changes:
-                        if change.field != "messages":
-                            continue
-                        value = change.value
-                        metadata = value.get("metadata")
-                        if config.whatsapp_phone_number_id and (
-                            not isinstance(metadata, dict)
-                            or metadata.get("phone_number_id") != config.whatsapp_phone_number_id
-                        ):
-                            continue
-                        for kind, items in (
-                            ("message", value.get("messages", [])),
-                            ("status", value.get("statuses", [])),
-                        ):
-                            if not isinstance(items, list):
-                                continue
-                            for item in items:
-                                if not isinstance(item, dict):
-                                    continue
-                                ident = item.get("id")
-                                if not isinstance(ident, str) or len(ident) > 240:
-                                    ident = hashlib.sha256(
-                                        json.dumps(item, sort_keys=True).encode()
-                                    ).hexdigest()
-                                if kind == "status":
-                                    ident = (
-                                        f"{ident}:{item.get('status', '')}:"
-                                        f"{item.get('timestamp', '')}"
-                                    )
-                                try:
-                                    with db.begin_nested():
-                                        db.add(
-                                            InboundEvent(
-                                                event_id=ident[:255], kind=kind, payload=item
-                                            )
-                                        )
-                                        db.flush()
-                                    accepted += 1
-                                except IntegrityError:
-                                    pass
+            drafts = webhook_events(
+                envelope, config.whatsapp_phone_number_id, config.webhook_max_events
+            )
+        except OverflowError as exc:
+            raise HTTPException(status_code=413, detail="too many webhook events") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="invalid webhook event") from exc
+        try:
+            accepted = await run_in_threadpool(store_events, session_factory, drafts)
         except SQLAlchemyError as exc:
+            logger.error("webhook_storage_failed", extra={"error_type": type(exc).__name__})
             raise HTTPException(status_code=503, detail="event storage unavailable") from exc
         return {"accepted": accepted}
 

@@ -12,6 +12,6 @@ class VolunteerCreate(BaseModel):
     @field_validator("phone_e164")
     @classmethod
     def validate_phone(cls, value: str) -> str:
-        if not re.fullmatch(r"\+[1-9]\d{7,14}", value):
+        if not re.fullmatch(r"\+[1-9][0-9]{7,14}", value):
             raise ValueError("phone must use E.164 format")
         return value

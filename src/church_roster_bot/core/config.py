@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     whatsapp_template_language: str = "pt_BR"
     conversation_ttl_minutes: int = Field(default=30, ge=1, le=1440)
     webhook_max_bytes: int = Field(default=262144, ge=1024)
+    webhook_max_events: int = Field(default=1000, ge=1, le=10000)
+    webhook_read_timeout_seconds: float = Field(default=5.0, ge=0.01, le=60)
     inbound_limit_per_minute: int = Field(default=30, ge=1)
 
     @field_validator("whatsapp_api_version")
