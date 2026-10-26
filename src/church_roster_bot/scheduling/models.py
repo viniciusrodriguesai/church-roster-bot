@@ -67,6 +67,7 @@ class ThirdDayRequest(Base):
     volunteer_id: Mapped[int] = mapped_column(ForeignKey("volunteers.id"), nullable=False)
     slot_id: Mapped[int] = mapped_column(ForeignKey("slots.id"), nullable=False)
     justification: Mapped[str] = mapped_column(String(1000), nullable=False)
+    service_fingerprint: Mapped[str | None] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)

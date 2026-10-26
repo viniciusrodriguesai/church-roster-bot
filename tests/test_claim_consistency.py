@@ -10,6 +10,7 @@ from sqlalchemy import event, select, text
 
 from church_roster_bot.administration.service import edit_service, edit_volunteer
 from church_roster_bot.members.models import Coordinator, Volunteer
+from church_roster_bot.ministries.models import Role
 from church_roster_bot.scheduling.errors import RosterError
 from church_roster_bot.scheduling.lifecycle import publish_schedule, schedule_for, set_slot_capacity
 from church_roster_bot.scheduling.models import MonthlySchedule
@@ -34,7 +35,7 @@ def service(roster, day=1, hour=19, capacity=2):
 @pytest.mark.parametrize(
     "roster", ["sqlite_file", pytest.param("postgres", marks=pytest.mark.postgres)], indirect=True
 )
-@pytest.mark.parametrize("changed", ["member", "capacity", "service", "schedule"])
+@pytest.mark.parametrize("changed", ["member", "capacity", "service", "schedule", "role"])
 def test_claim_revalidates_cached_rows_after_another_transaction(roster, changed):
     engine, factory, ids = roster
     first = add(engine, ids, FIRST)
@@ -52,6 +53,7 @@ def test_claim_revalidates_cached_rows_after_another_transaction(roster, changed
             "capacity": (Slot, slot),
             "service": (WorshipService, sid),
             "schedule": (MonthlySchedule, schedule),
+            "role": (Role, ids["offer"]),
         }[changed]
         snapshot = cached.get(model, identity)
         with factory.begin() as writer:
@@ -69,6 +71,8 @@ def test_claim_revalidates_cached_rows_after_another_transaction(roster, changed
                     "coordinator",
                     ids["coordinator"],
                 )
+            elif changed == "role":
+                writer.get(Role, ids["offer"]).active = False
             else:
                 writer.get(MonthlySchedule, schedule).state = "closed"
         assert snapshot is not None  # retain the actual stale identity-map object

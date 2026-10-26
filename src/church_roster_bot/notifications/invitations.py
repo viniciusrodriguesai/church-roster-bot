@@ -1,9 +1,12 @@
 """Invitation delivery is independent from explicit roster acceptance."""
 
+from zoneinfo import ZoneInfoNotFoundError
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from church_roster_bot.core.config import Settings
+from church_roster_bot.core.time import utc_now
 from church_roster_bot.members.models import Coordinator, Volunteer
 from church_roster_bot.ministries.models import Role
 from church_roster_bot.notifications.coordinators import prepare_coordinator_notice
@@ -11,6 +14,7 @@ from church_roster_bot.notifications.outbox import window_open
 from church_roster_bot.scheduling.lifecycle import invitation_text
 from church_roster_bot.scheduling.models import ThirdDayRequest
 from church_roster_bot.services.models import Slot, WorshipService
+from church_roster_bot.services.timing import service_fingerprint, service_start
 from church_roster_bot.whatsapp.models import OutboundMessage
 from church_roster_bot.whatsapp.payloads import buttons_payload, template_payload, text_payload
 
@@ -24,7 +28,7 @@ DELIVERY_LABELS = {
     "blocked_window": "envio bloqueado: template aprovado necessário fora da janela de 24 horas",
     "failed": "falha no envio",
     "unknown": "envio incerto; não reenviar automaticamente para evitar duplicidade",
-    "cancelled": "envio cancelado: convite já respondido",
+    "cancelled": "envio cancelado: convite respondido ou não aplicável",
 }
 
 
@@ -67,6 +71,19 @@ def prepare_invitation(db: Session, outgoing: OutboundMessage, config: Settings)
     if invitation.status != "pending":
         outgoing.status = "cancelled"
         return
+    slot = db.get(Slot, invitation.slot_id)
+    service = db.get(WorshipService, slot.service_id)
+    try:
+        elapsed = (
+            not invitation.service_fingerprint
+            or invitation.service_fingerprint != service_fingerprint(db, slot)
+            or service_start(db, service) <= utc_now()
+        )
+    except (ValueError, ZoneInfoNotFoundError):
+        elapsed = True
+    if elapsed:
+        outgoing.status, outgoing.error_code = "cancelled", "invitation_not_applicable"
+        return
     if (
         not member.active
         or not member.invite_opt_in
@@ -87,8 +104,6 @@ def prepare_invitation(db: Session, outgoing: OutboundMessage, config: Settings)
             else text_payload(body)
         )
     elif config.whatsapp_invite_template:
-        slot = db.get(Slot, invitation.slot_id)
-        service = db.get(WorshipService, slot.service_id)
         outgoing.payload = template_payload(
             config.whatsapp_invite_template,
             config.whatsapp_template_language,

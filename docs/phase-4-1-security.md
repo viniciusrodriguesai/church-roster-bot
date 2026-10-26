@@ -50,6 +50,8 @@ worker, com transporte fictício. Não há nova fila externa ou painel administr
 | R03 | Média | RuntimeError arbitrário no transporte era classificado como credencial ausente; resposta HTTP malformada perdia sua classificação | Corrigido: exceção específica antes do envio; demais resultados incertos ficam unknown; validar ID retornado e preservar HTTP 429 |
 | P01 | Média | Repr da configuração incluía senha na URL e validações exibiam valores de entrada | Corrigido: URL fora do repr e entradas ocultas na representação textual de erros Pydantic |
 | P02 | Média | Timestamp de entrada no futuro liberava janela livre de 24 horas | Corrigido: delta precisa ser não negativo e inferior a 24 horas |
+| I01 | Alta | Convite excepcional numérico podia ser criado/enviado/aceito após início do culto | Corrigido: comparar início UTC do culto na criação, claim e aceite; recusa continua disponível |
+| I02 | Alta | Mudança de data, hora ou fuso depois da autorização permitia aplicar aceite a um culto diferente do apresentado | Corrigido: fingerprint imutável da autorização, revalidação atual e nova autorização preservando histórico |
 
 As gravidades descrevem impacto e condições de exploração; não são pontuações
 CVSS ou certificação. As correções são verificadas com casos que falham antes
@@ -129,6 +131,22 @@ deve gerar o aviso atual; não reenviar manualmente o conteúdo antigo sem revis
 Respostas diretas de conversas mantêm a autorização verificada ao processar o
 comando. Alertas novos de substituição usam os helpers existentes de coordenação
 e de membro, incluindo deduplicação, consentimento e conferência de destinatário.
+
+Convites excepcionais numéricos também verificam o início do culto em UTC e o
+fingerprint de identidade (culto, vaga, função, ministério, data, hora e fuso).
+O aceite exige a identidade autorizada originalmente. A criação registra esse
+snapshot; o transporte e o aceite o conferem novamente. Consultas de identidade
+e fuso relêem objetos que podem estar no cache ORM de uma transação mais longa.
+Os testes controlam somente o relógio da aplicação, inclusive o instante exato
+de início; o relógio do computador não é alterado.
+
+A migração 431d9e6a8102 é aditiva e reversível. Registros legados preservam
+justificativa, status, autor e histórico, com fingerprint NULL: não se inventa
+prova do culto mostrado anteriormente. Aceites pendentes sem snapshot exigem
+nova autorização, que cria outro pedido sem sobrescrever o anterior. Os estados
+legados continuam pending/accepted/declined; pending histórico não significa
+que o convite ainda é aplicável. Recusar continua possível após o início ou
+mudança do culto. Um convite inaplicável não é enviado e não cria inscrição.
 
 O primeiro pip-audit encontrou 12 registros relativos ao pip 25.0.1 da imagem
 de teste, representando seis IDs de advisory distintos, com entradas duplicadas

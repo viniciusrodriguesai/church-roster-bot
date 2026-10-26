@@ -1,13 +1,15 @@
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, time
+from datetime import date, datetime, time
 from itertools import combinations
+from zoneinfo import ZoneInfoNotFoundError
 
 from sqlalchemy import and_, distinct, func, or_, select
 from sqlalchemy.orm import Session
 
 from church_roster_bot.availability.models import Unavailability
+from church_roster_bot.core.time import utc_now
 from church_roster_bot.members.models import (
     Coordinator,
     CoordinatorMinistry,
@@ -33,6 +35,7 @@ from church_roster_bot.scheduling.models import (
     ThirdDayRequest,
 )
 from church_roster_bot.services.models import Slot, WorshipService
+from church_roster_bot.services.timing import service_fingerprint, service_start
 
 SessionFactory = Callable[[], Session]
 OCCUPYING = ("pending_confirmation", "confirmed", "replacement_requested", "completed")
@@ -59,6 +62,15 @@ def month_bounds(day: date) -> tuple[date, date]:
     start = day.replace(day=1)
     end = date(day.year + (day.month == 12), day.month % 12 + 1, 1)
     return start, end
+
+
+def require_future_exception(db: Session, service: WorshipService, instant: datetime) -> None:
+    try:
+        start = service_start(db, service)
+    except (ValueError, ZoneInfoNotFoundError) as exc:
+        raise RosterError("horário do culto inválido; consulte a coordenação") from exc
+    if start <= instant:
+        raise RosterError("convite expirado: o culto já começou")
 
 
 class RosterEngine:
@@ -228,6 +240,7 @@ class RosterEngine:
         justification: str,
         *,
         db: Session | None = None,
+        now: datetime | None = None,
     ) -> int:
         if not justification.strip() or len(justification.strip()) > 1000:
             raise RosterError(
@@ -253,12 +266,15 @@ class RosterEngine:
                 is None
             ):
                 raise NotAuthorized("coordinator does not manage this ministry")
+            require_future_exception(db, service, utc_now(now))
             self._check_eligibility(db, member, slot, service)
+            fingerprint = service_fingerprint(db, slot)
             existing = db.scalar(
                 select(ThirdDayRequest).where(
                     ThirdDayRequest.volunteer_id == volunteer_id,
                     ThirdDayRequest.slot_id == slot_id,
                     ThirdDayRequest.status == "pending",
+                    ThirdDayRequest.service_fingerprint == fingerprint,
                 )
             )
             if existing:
@@ -270,13 +286,20 @@ class RosterEngine:
                 volunteer_id=volunteer_id,
                 slot_id=slot_id,
                 justification=justification.strip(),
+                service_fingerprint=fingerprint,
             )
             db.add(request)
             db.flush()
             return request.id
 
     def respond_third_day(
-        self, volunteer_id: int, request_id: int, accept: bool, *, db: Session | None = None
+        self,
+        volunteer_id: int,
+        request_id: int,
+        accept: bool,
+        *,
+        db: Session | None = None,
+        now: datetime | None = None,
     ) -> int | None:
         with self._transaction(db) as db:
             original = db.get(ThirdDayRequest, request_id)
@@ -291,11 +314,17 @@ class RosterEngine:
             )
             if request.status != "pending":
                 raise RosterError("invitation already answered")
-            request.responded_at = datetime.now(UTC)
+            instant = utc_now(now)
+            request.responded_at = instant
             if not accept:
                 request.status = "declined"
                 return None
             service = db.get(WorshipService, slot.service_id)
+            require_future_exception(db, service, instant)
+            if not request.service_fingerprint or (
+                request.service_fingerprint != service_fingerprint(db, slot)
+            ):
+                raise RosterError("convite desatualizado; solicite nova autorização à coordenação")
             if self._monthly_days(db, volunteer_id, service.service_date) != 2:
                 raise MonthlyLimit("monthly participation changed; request a new authorization")
             assignment_id = self._assign_locked(
@@ -534,10 +563,10 @@ class RosterEngine:
         *,
         projected_roles: Sequence[int] = (),
     ) -> None:
-        ministry = db.get(Ministry, service.ministry_id)
+        ministry = db.get(Ministry, service.ministry_id, populate_existing=True)
         if ministry.church_id != member.church_id:
             raise RoleMismatch("volunteer belongs to another church")
-        role = db.get(Role, slot.role_id)
+        role = db.get(Role, slot.role_id, populate_existing=True)
         if role is None or not role.active:
             raise RoleMismatch("role is not active")
         if (

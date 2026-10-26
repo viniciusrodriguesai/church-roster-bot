@@ -12,15 +12,15 @@ from church_roster_bot.services.models import Slot, WorshipService
 
 
 def service_start(db: Session, service: WorshipService) -> datetime:
-    ministry = db.get(Ministry, service.ministry_id)
-    church = db.get(Church, ministry.church_id)
+    ministry = db.get(Ministry, service.ministry_id, populate_existing=True)
+    church = db.get(Church, ministry.church_id, populate_existing=True)
     return local_to_utc(service.service_date, service.start_time, church.timezone)
 
 
 def service_fingerprint(db: Session, slot: Slot) -> str:
-    service = db.get(WorshipService, slot.service_id)
-    ministry = db.get(Ministry, service.ministry_id)
-    church = db.get(Church, ministry.church_id)
+    service = db.get(WorshipService, slot.service_id, populate_existing=True)
+    ministry = db.get(Ministry, service.ministry_id, populate_existing=True)
+    church = db.get(Church, ministry.church_id, populate_existing=True)
     values = (
         service.id,
         service.ministry_id,

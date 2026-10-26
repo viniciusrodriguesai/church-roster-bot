@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 from pydantic import ValidationError
@@ -16,6 +16,8 @@ from church_roster_bot.scheduling.errors import (
 )
 from church_roster_bot.scheduling.models import Assignment, ThirdDayRequest
 from tests.conftest import make_service
+
+FUTURE_MONTH = (date.today().replace(day=1) + timedelta(days=32)).replace(day=1)
 
 
 def add_member(engine, church, phone, roles, name="Pessoa Fictícia"):
@@ -67,7 +69,9 @@ def test_third_day_requires_coordinator_reason_and_volunteer_acceptance(roster):
     member = add_member(engine, ids["church"], "+15550100003", [ids["open"]])
     slots = []
     for day in (1, 4, 7):
-        _, s = make_service(engine, factory, ids["ministry"], date(2026, 11, day), {ids["open"]: 1})
+        _, s = make_service(
+            engine, factory, ids["ministry"], FUTURE_MONTH.replace(day=day), {ids["open"]: 1}
+        )
         slots.append(s[ids["open"]])
     engine.assign(member, slots[0])
     engine.assign(member, slots[1])
@@ -80,13 +84,13 @@ def test_third_day_requires_coordinator_reason_and_volunteer_acceptance(roster):
     )
     with factory() as db:
         assert db.get(ThirdDayRequest, request_id).status == "pending"
-        assert engine.monthly_days(member, date(2026, 11, 7)) == 2
+        assert engine.monthly_days(member, FUTURE_MONTH.replace(day=7)) == 2
     assignment_id = engine.respond_third_day(member, request_id, True)
     with factory() as db:
         assignment = db.get(Assignment, assignment_id)
         assert assignment.exception_id == request_id
         assert db.get(ThirdDayRequest, request_id).justification == "Necessidade pontual"
-    assert engine.monthly_days(member, date(2026, 11, 7)) == 3
+    assert engine.monthly_days(member, FUTURE_MONTH.replace(day=7)) == 3
 
 
 def test_declined_third_day_does_not_assign(roster):
@@ -94,7 +98,9 @@ def test_declined_third_day_does_not_assign(roster):
     member = add_member(engine, ids["church"], "+15550100004", [ids["open"]])
     slots = []
     for day in (1, 4, 7):
-        _, s = make_service(engine, factory, ids["ministry"], date(2026, 11, day), {ids["open"]: 1})
+        _, s = make_service(
+            engine, factory, ids["ministry"], FUTURE_MONTH.replace(day=day), {ids["open"]: 1}
+        )
         slots.append(s[ids["open"]])
     engine.assign(member, slots[0])
     engine.assign(member, slots[1])
@@ -102,7 +108,7 @@ def test_declined_third_day_does_not_assign(roster):
         ids["coordinator"], member, slots[2], "Cobertura excepcional"
     )
     assert engine.respond_third_day(member, request_id, False) is None
-    assert engine.monthly_days(member, date(2026, 11, 7)) == 2
+    assert engine.monthly_days(member, FUTURE_MONTH.replace(day=7)) == 2
     with pytest.raises(RosterError):
         engine.respond_third_day(member, request_id, True)
 
