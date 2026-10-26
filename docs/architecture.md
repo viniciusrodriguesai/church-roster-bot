@@ -102,7 +102,7 @@ O número recebido de um webhook assinado é procurado no cadastro. Voluntários
 
 ## Limites atuais
 
-- O processo HTTP e o worker devem permanecer ativos em hospedagem própria. O endpoint `/health` não testa o banco.
+- O processo HTTP e o worker devem permanecer ativos em hospedagem própria. `/health` e `/health/live` não testam o banco; `/health/ready` verifica conectividade em conexão independente, com prazo de resposta e uma sondagem em andamento. Veja [auditoria da Fase 4.1](phase-4-1-security.md) para os limites e o ciclo de vida.
 - Uma perda de rede após a Meta aceitar um envio tem resultado ambíguo. O worker marca `unknown` e não repete automaticamente para evitar mensagem duplicada. HTTP 429 tem até três tentativas. Monitore e resolva `failed`, `unknown` e `blocked_window`.
 - Rode uma instância do worker nesta fase. Eventos de status que chegarem antes do registro do ID de saída podem exigir reconciliação manual.
 - Um template aprovado e consentimento são necessários para convites fora da janela de 24 horas; sem isso, o convite continua registrado, mas a notificação fica bloqueada.

@@ -1,6 +1,6 @@
 # Church Roster Bot
 
-Bot open source para escalas de voluntários pelo WhatsApp. **Estado: Fase 2 implementada no código e no simulador; nenhum número real da Meta foi conectado ou testado.** O Diaconato é o primeiro ministério. Não há painel web.
+Bot open source para escalas de voluntários pelo WhatsApp. **Estado: Fases 1–3 integradas; Fase 4.1 em auditoria na branch de desenvolvimento. Nenhum número real da Meta foi conectado ou testado.** O Diaconato é o primeiro ministério. Não há painel web.
 
 ## O que funciona
 
@@ -47,7 +47,7 @@ Mantenha os dois terminais abertos e digite somente uma mensagem por vez, sem co
 Configure a senha local em `.env` e no `DATABASE_URL` antes de usar o Compose. O arquivo `.env.example` contém somente exemplos. Com Docker Desktop ativo:
 
 ```powershell
-Copy-Item .env.example .env
+if (!(Test-Path .env)) { Copy-Item .env.example .env }
 docker compose up -d db
 .venv\Scripts\alembic.exe upgrade head
 .venv\Scripts\python.exe -m church_roster_bot.scripts.seed_demo
@@ -55,6 +55,16 @@ docker compose up -d db
 ```
 
 Em outro processo, após configurar a Meta, execute `python -m church_roster_bot.notifications.worker`. O webhook responde após gravar o evento no banco; o worker processa o fluxo e envia a resposta. Mantenha **uma instância do worker** nesta fase. O endpoint `/health` verifica somente o processo HTTP. Para iniciar uma igreja real, o operador confiável cria o primeiro administrador com `python -m church_roster_bot.scripts.bootstrap_admin --church-id <id>`; o script pede o número localmente. A partir daí, a gestão ocorre no WhatsApp.
+
+## Health checks e auditoria da Fase 4.1
+
+`GET /health` e `GET /health/live` verificam o processo, sem depender do banco.
+`GET /health/ready` verifica o banco em conexão somente de leitura e retorna 503
+se indisponível ou se ultrapassar `HEALTH_READY_TIMEOUT_SECONDS` (2 segundos).
+Uma única sondagem pode estar em andamento. Readiness não substitui migrações
+nem valida a Meta ou o worker. Use SQLite em arquivo ou PostgreSQL para esse
+endpoint; SQLite privado em memória retorna 503. O servidor deve executar o
+lifespan ASGI. Consulte [auditoria e limitações](docs/phase-4-1-security.md).
 
 ## Verificação
 

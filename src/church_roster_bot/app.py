@@ -6,16 +6,19 @@ import hmac
 import json
 import logging
 import re
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import ValidationError
+from sqlalchemy.engine import make_url
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import ClientDisconnect
 
 from church_roster_bot.core.config import Settings, settings
 from church_roster_bot.core.database import SessionLocal
+from church_roster_bot.core.health import DatabaseReadiness
 from church_roster_bot.whatsapp.inbox import store_events
 from church_roster_bot.whatsapp.payloads import WebhookEnvelope, webhook_events
 
@@ -27,11 +30,34 @@ def reject_json_constant(value: str):
 
 
 def create_app(session_factory=SessionLocal, config: Settings = settings) -> FastAPI:
-    app = FastAPI(title="Church Roster Bot", docs_url=None, redoc_url=None)
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        bind = getattr(session_factory, "kw", {}).get("bind")
+        url = bind.url if bind is not None else make_url(config.database_url)
+        probe = DatabaseReadiness(url, config.health_ready_timeout_seconds)
+        app.state.readiness = probe
+        try:
+            yield
+        finally:
+            app.state.readiness = None
+            probe.close()
+
+    app = FastAPI(title="Church Roster Bot", docs_url=None, redoc_url=None, lifespan=lifespan)
 
     @app.get("/health")
+    @app.get("/health/live")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/health/ready")
+    async def ready() -> JSONResponse:
+        probe = getattr(app.state, "readiness", None)
+        available = probe is not None and await probe.check()
+        return JSONResponse(
+            {"status": "ok" if available else "unavailable"},
+            status_code=200 if available else 503,
+            headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+        )
 
     @app.get("/webhooks/whatsapp")
     def verify_webhook(request: Request):

@@ -123,8 +123,31 @@ a transação e as restrições são exercitadas em SQLite e PostgreSQL.
 
 ## Health e gates de conclusão
 
-Implementação de `/health/live` e `/health/ready` ainda pendente no próximo
-incremento da Fase 4.1. `/health` permanece compatível com liveness.
+`GET /health/live` e `/health` respondem 200 com `{"status":"ok"}` sem acessar
+o banco. `GET /health/ready` responde 200/ok ou 503/unavailable, sem detalhes
+de conexão e com Cache-Control: no-store. O timeout HTTP é
+`HEALTH_READY_TIMEOUT_SECONDS` (2 segundos, configurável entre 0.05 e 10).
+
+A sondagem usa conexão independente e NullPool, sem alterar o pool da aplicação.
+PostgreSQL tem connect_timeout, statement_timeout, lock_timeout e transação
+somente leitura. SQLite em arquivo é aberto com mode=ro: não cria um arquivo
+ausente e lê schema_version para detectar corrupção. A conexão é fechada pelo
+context manager e o pool de sondagem é descartado no encerramento do lifespan.
+
+Um timeout HTTP não pode interromper com segurança um driver síncrono: existe
+no máximo uma thread e um Future em andamento por aplicação. Pedidos simultâneos
+compartilham esse Future, sem abandoná-lo/cancelá-lo ao devolver 503. Os timeouts
+nativos limitam a operação subjacente; ela fecha recursos ao terminar. DNS do
+sistema e DSNs com múltiplos hosts podem demorar além do prazo HTTP, mas não
+criam uma fila crescente de sondagens. Testar a configuração efetiva antes da
+implantação. O endpoint verifica conectividade, não comprova permissões de
+escrita, estado das migrações, funcionamento da Meta ou do worker.
+
+SQLite privado em memória não é elegível para readiness de implantação e retorna
+503: uma conexão independente não alcança esse banco; compartilhar o StaticPool
+poderia reverter uma transação de negócio. Liveness e conversas continuam
+compatíveis. Para simular readiness, usar SQLite novo em arquivo. Sem inicializar
+o lifespan ASGI, readiness também retorna 503; TestClient deve ser usado com `with`.
 
 Antes de concluir esta etapa: resolver os achados no escopo, testar autorização,
 health/falhas, rodar a suíte completa PostgreSQL e migrações, Ruff/formatação,
