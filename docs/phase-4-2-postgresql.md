@@ -50,6 +50,18 @@ Não executar down -v, seeds ou migrações sobre volumes preexistentes.
 
 ## Gates ainda em implementação
 
+## Reconciliação canônica
+
+database.canonical verifica tipos reais, limites INTEGER/VARCHAR, booleanos
+estritos e precisão JSON com Decimal. Não transforma números em strings nem
+silencia chaves JSON duplicadas, NaN, NUL ou Unicode inválido. Timestamp SQLite
+sem offset segue o contrato UTC do projeto; datas e horários de cultos continuam
+civis. SQL NULL e JSON null têm fingerprints distintos. A prova é SHA256 por
+tabela, por linha em ordem de PK, com nomes de colunas explícitos. A mesma
+contagem com conteúdo diferente é uma divergência, não uma migração aprovada.
+
+## Gates ainda em implementação
+
 Faltam ferramenta SQLite → PostgreSQL/dry-run, reconciliação, round trips de
 migração, backup/restauração oficial, testes após transferência e relatório final.
 Não considerar a fase concluída antes dessas verificações e da CI final aprovada.
