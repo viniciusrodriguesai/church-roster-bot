@@ -43,9 +43,15 @@ def test_provider_urls_use_the_supported_driver(scheme):
 @pytest.mark.postgres
 @pytest.mark.parametrize("roster", ["postgres"], indirect=True)
 def test_native_timeout_rolls_back_and_pool_recovers(roster):
+    original = roster[1].kw["bind"]
+    with original.connect() as baseline:
+        expected_schema = baseline.scalar(text("SELECT current_schema()"))
+    native = str(original.url.query.get("options", "")) + " -c application_name=phase42_policy_test"
     config = Settings(
         _env_file=None,
-        database_url=roster[1].kw["bind"].url.render_as_string(hide_password=False),
+        database_url=original.url.update_query_dict({"options": native}).render_as_string(
+            hide_password=False
+        ),
         db_statement_timeout_ms=50,
         db_pool_size=1,
         db_max_overflow=0,
@@ -56,10 +62,8 @@ def test_native_timeout_rolls_back_and_pool_recovers(roster):
         with engine.begin() as db:
             assert db.scalar(text("SHOW timezone")) == "UTC"
             assert db.scalar(text("SHOW transaction_isolation")) == "read committed"
-            assert (
-                db.scalar(text("SELECT current_schema()"))
-                == roster[1].kw["bind"].url.query["options"].split("=")[-1]
-            )
+            assert db.scalar(text("SELECT current_schema()")) == expected_schema
+            assert db.scalar(text("SHOW application_name")) == "phase42_policy_test"
             with pytest.raises(TimeoutError):
                 engine.connect()
         with pytest.raises(OperationalError), engine.begin() as db:
