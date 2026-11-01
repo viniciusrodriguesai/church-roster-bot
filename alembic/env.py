@@ -2,12 +2,10 @@
 
 from logging.config import fileConfig
 
-from sqlalchemy import create_engine, pool
-
 from alembic import context
 from church_roster_bot.core import models  # noqa: F401 - register ORM tables
 from church_roster_bot.core.config import settings
-from church_roster_bot.core.database import Base
+from church_roster_bot.core.database import Base, database_engine
 
 config = context.config
 if config.config_file_name and config.attributes.get("configure_logger", True):
@@ -27,7 +25,7 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    connectable = create_engine(settings.database_url, poolclass=pool.NullPool)
+    connectable = database_engine(settings, unpooled=True)
     try:
         with connectable.connect() as connection:
             context.configure(connection=connection, target_metadata=target_metadata)
