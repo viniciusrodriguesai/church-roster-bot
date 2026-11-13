@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 from datetime import UTC, date, datetime, time
 from decimal import Decimal
 
@@ -103,6 +104,12 @@ def typed_value(column: Column, value: object):
                 raise ValueError("identity sequence exhausted")
             return value
         if isinstance(column.type, DateTime):
+            if isinstance(value, str) and not re.fullmatch(
+                r"\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?"
+                r"(?:Z|[+-]\d{2}:\d{2})?",
+                value,
+            ):
+                raise ValueError("explicit timestamp with portable precision required")
             parsed = datetime.fromisoformat(value) if isinstance(value, str) else value
             if not isinstance(parsed, datetime):
                 raise ValueError("datetime required")
@@ -113,6 +120,10 @@ def typed_value(column: Column, value: object):
                 raise ValueError("civil date required")
             return parsed
         if isinstance(column.type, Time):
+            if isinstance(value, str) and not re.fullmatch(
+                r"\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?", value
+            ):
+                raise ValueError("civil time with portable precision required")
             parsed = time.fromisoformat(value) if isinstance(value, str) else value
             if not isinstance(parsed, time) or parsed.tzinfo is not None:
                 raise ValueError("civil time without timezone required")

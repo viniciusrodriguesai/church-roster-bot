@@ -13,6 +13,7 @@ from sqlalchemy import (
     MetaData,
     String,
     Table,
+    Time,
     create_engine,
     text,
 )
@@ -52,6 +53,20 @@ def test_utc_conversion_preserves_the_instant_not_church_wall_time():
     value = typed_value(column(DateTime(timezone=True)), "2026-12-04T19:30:00-03:00")
     assert value == datetime(2026, 12, 4, 22, 30, tzinfo=UTC)
     assert typed_value(column(DateTime(timezone=True)), "2026-12-04T22:30:00") == value
+
+
+@pytest.mark.parametrize(
+    "kind,value",
+    [
+        (DateTime(timezone=True), "2026-12-04"),
+        (DateTime(timezone=True), "2026-12-04T22:30:00.1234567"),
+        (Time(), "19:30:00.1234567"),
+        (Time(), "19:30:00-03:00"),
+    ],
+)
+def test_temporal_values_are_never_silently_truncated_or_given_a_missing_time(kind, value):
+    with pytest.raises(TransferError, match="incompatible_value"):
+        typed_value(column(kind), value)
 
 
 @pytest.mark.parametrize("kind,value", [(Integer, 2**40), (String(3), "FICTITIOUS_SECRET")])
