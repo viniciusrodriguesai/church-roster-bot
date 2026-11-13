@@ -176,6 +176,49 @@ com `TEST_DATABASE_URL` descartável para testar confirmação, CLI, precisão,
 versões antigas, importadores concorrentes, rollback de linhas e sequences e
 perda real de conexão durante transação e commit.
 
+## Backup e restauração em ambiente isolado
+
+Use clientes oficiais da mesma versão principal do servidor. O ensaio utiliza
+PostgreSQL 17, `pg_dump` custom e `pg_restore`; compare o resultado da restauração,
+não apenas a existência do arquivo. Configure previamente serviços libpq distintos
+para origem e destino, com credenciais fora do Git e do histórico do shell.
+O destino precisa ser um banco novo e autorizado. Os nomes abaixo são aliases
+de configuração, não servidores provisionados nesta fase:
+
+```sh
+PGSERVICE=roster_backup_source pg_dump --format=custom \
+  --no-owner --no-privileges --file=/caminho/novo-backup.dump
+pg_restore --list /caminho/novo-backup.dump
+pg_restore --dbname=service=roster_validation_restore \
+  --single-transaction --exit-on-error --no-owner --no-privileges \
+  /caminho/novo-backup.dump
+```
+
+Não use `--clean` em bancos existentes nem sobrescreva backups anteriores.
+Proteja o arquivo como dados pessoais quando contiver dados reais. `pg_dump`
+não inclui papéis globais do cluster; propriedade e privilégios precisam ser
+revisados e atribuídos aos papéis apropriados no destino. O ensaio exclui
+ownership/ACLs para validar a restauração com papel de instalação separado.
+Não há agendamento, retenção em nuvem ou monitoramento implementado nesta fase.
+
+`tests/test_postgres_backup.py` migra uma origem fictícia com as 28 tabelas,
+gera um dump apenas do esquema exclusivo do ensaio e verifica seu catálogo
+com `pg_restore --list`. Cria um banco novo, restaura em transação única,
+reconcilia fingerprints e sequences, executa Alembic upgrade/check e cadastra
+um novo voluntário pelo aplicativo. A remoção final usa exclusivamente o nome
+gerado e o OID do banco criado pelo próprio teste, sem alterar outros bancos.
+
+Execute com `TEST_DATABASE_URL` descartável e clientes 17 em
+`/usr/lib/postgresql/17/bin`, ou com Docker e `POSTGRES_TEST_CONTAINER`
+explicitamente apontando para o contêiner PostgreSQL de teste. A CI passa o
+ID do seu próprio serviço. Não há descoberta automática de contêineres ou uso
+de um servidor PostgreSQL externo. O caminho Docker também foi validado no
+Windows; credenciais não são passadas em argumentos dos clientes.
+
+Consulte os manuais de [pg_dump](https://www.postgresql.org/docs/17/app-pgdump.html),
+[pg_restore](https://www.postgresql.org/docs/17/app-pgrestore.html) e
+[serviços libpq](https://www.postgresql.org/docs/17/libpq-pgservice.html).
+
 ## Gates ainda em implementação
 
 Faltam ferramenta SQLite → PostgreSQL/dry-run, reconciliação, round trips de

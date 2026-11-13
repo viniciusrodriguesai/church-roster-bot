@@ -26,6 +26,7 @@ jobs:
     env:
       TEST_DATABASE_URL: postgresql+psycopg://roster:test-only-password@localhost:5432/roster_test
       DATABASE_URL: postgresql+psycopg://roster:test-only-password@localhost:5432/roster_test
+      POSTGRES_TEST_CONTAINER: ${{ job.services.postgres.id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
