@@ -48,8 +48,6 @@ Para validação usar projeto Compose novo, arquivo de ambiente próprio e
 POSTGRES_PORT=0 (porta dinâmica); registrar a porta com docker compose port db 5432.
 Não executar down -v, seeds ou migrações sobre volumes preexistentes.
 
-## Gates ainda em implementação
-
 ## Reconciliação canônica
 
 database.canonical verifica tipos reais, limites INTEGER/VARCHAR, booleanos
@@ -59,6 +57,42 @@ sem offset segue o contrato UTC do projeto; datas e horários de cultos continua
 civis. SQL NULL e JSON null têm fingerprints distintos. A prova é SHA256 por
 tabela, por linha em ordem de PK, com nomes de colunas explícitos. A mesma
 contagem com conteúdo diferente é uma divergência, não uma migração aprovada.
+
+## Preparação da origem e comparação dos esquemas
+
+A origem é aberta com `mode=ro`, `query_only` e uma transação de leitura.
+SHA256, identidade do arquivo, tamanho e data de modificação são comparados
+antes e depois. Arquivo ausente não é criado. WAL, SHM, journal ou modo WAL
+exigem um snapshot offline consistente produzido pelo operador; a ferramenta
+recusa esses arquivos em vez de ignorar alterações ainda não incorporadas.
+Não use `immutable=1` para encobrir um WAL existente.
+
+O esquema físico precisa corresponder à revisão Alembic declarada. São
+verificados tabelas, tipos, nulabilidade, PKs, FKs, unicidade, checks e índices
+parciais. Tabelas adicionais, views e triggers não previstos são recusados.
+No PostgreSQL, uma versão Alembic correta não basta: constraints precisam
+estar validadas, triggers de integridade ativos e o esquema real precisa
+corresponder aos modelos atuais. Uma constraint enfraquecida é divergência.
+
+Versões conhecidas desde o final da Fase 2 podem ser preparadas somente com
+autorização de atualização de cópia. O backup SQLite é feito em diretório
+temporário privado; Alembic atualiza essa cópia, mantendo a origem somente
+leitura. Fingerprints de todas as colunas antigas são comparados antes e
+depois. Esquema sem versão só é aceito quando corresponde integralmente ao
+head atual. Não são inventadas permissões, consentimentos ou outros dados
+ausentes no histórico. O contrato de conexão fornecida ao Alembic mantém
+essa conexão utilizável e não a encerra implicitamente.
+
+Para executar os testes de preparação, configure `TEST_DATABASE_URL` para
+um PostgreSQL descartável e execute:
+
+```sh
+pytest -q tests/test_transfer_canonical.py tests/test_transfer_schema.py \
+  tests/test_transfer_source.py tests/test_migration_logging.py
+```
+
+A ferramenta ainda em implementação será aprovada separadamente, incluindo
+transações reais, rollback, confirmação do destino e reconciliação pós-cópia.
 
 ## Gates ainda em implementação
 

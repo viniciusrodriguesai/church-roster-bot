@@ -24,13 +24,21 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
+def migrate_connection(connection) -> None:
+    context.configure(connection=connection, target_metadata=target_metadata)
+    with context.begin_transaction():
+        context.run_migrations()
+
+
 def run_migrations_online() -> None:
+    supplied = config.attributes.get("connection")
+    if supplied is not None:
+        migrate_connection(supplied)
+        return
     connectable = database_engine(settings, unpooled=True)
     try:
         with connectable.connect() as connection:
-            context.configure(connection=connection, target_metadata=target_metadata)
-            with context.begin_transaction():
-                context.run_migrations()
+            migrate_connection(connection)
     finally:
         connectable.dispose()
 
