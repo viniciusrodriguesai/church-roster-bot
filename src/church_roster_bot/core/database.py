@@ -15,12 +15,18 @@ class Base(DeclarativeBase):
     pass
 
 
-def database_engine(config: Settings, *, unpooled: bool = False) -> Engine:
+def database_engine(
+    config: Settings, *, unpooled: bool = False, json_serializer=None, json_deserializer=None
+) -> Engine:
     """Bounded PostgreSQL connections; SQLite retains its simulation semantics."""
     from sqlalchemy.pool import NullPool
 
     url = make_url(config.database_url)
     options = {"pool_pre_ping": True, "hide_parameters": True}
+    if json_serializer is not None:
+        options["json_serializer"] = json_serializer
+    if json_deserializer is not None:
+        options["json_deserializer"] = json_deserializer
     if unpooled:
         options["poolclass"] = NullPool
     if url.get_backend_name() == "postgresql":

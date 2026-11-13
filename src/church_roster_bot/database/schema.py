@@ -226,7 +226,8 @@ def validate_postgres(connection, schema: str) -> None:
     bad = connection.scalar(
         text(
             "SELECT count(*) FROM pg_constraint c JOIN pg_namespace n ON n.oid=c.connamespace "
-            "WHERE n.nspname=:schema AND NOT c.convalidated"
+            "WHERE n.nspname=:schema AND (NOT c.convalidated OR c.condeferrable "
+            "OR (c.contype='f' AND (c.confdeltype<>'a' OR c.confupdtype<>'a')))"
         ),
         {"schema": schema},
     )
@@ -238,5 +239,20 @@ def validate_postgres(connection, schema: str) -> None:
         ),
         {"schema": schema},
     )
-    if bad or triggers or connection.scalar(text("SHOW session_replication_role")) != "origin":
+    invalid_indexes = connection.scalar(
+        text(
+            "SELECT count(*) FROM pg_index i JOIN pg_class r ON r.oid=i.indrelid "
+            "JOIN pg_namespace n ON n.oid=r.relnamespace WHERE n.nspname=:schema "
+            "AND (NOT i.indisvalid OR NOT i.indisready OR NOT i.indislive)"
+        ),
+        {"schema": schema},
+    )
+    # Current metadata has no deferred constraints or cascading FK actions.
+    # Reflection alone omits these enforcement details and invalid index state.
+    if (
+        bad
+        or triggers
+        or invalid_indexes
+        or connection.scalar(text("SHOW session_replication_role")) != "origin"
+    ):
         raise TransferError("constraints_not_enforced")

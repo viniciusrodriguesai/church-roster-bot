@@ -94,6 +94,88 @@ pytest -q tests/test_transfer_canonical.py tests/test_transfer_schema.py \
 A ferramenta ainda em implementação será aprovada separadamente, incluindo
 transações reais, rollback, confirmação do destino e reconciliação pós-cópia.
 
+## Transferência controlada
+
+Execute a ferramenta a partir de um checkout com os arquivos Alembic disponíveis.
+Prepare um PostgreSQL novo e isolado com `alembic upgrade head`. Todas as 28
+tabelas de negócio do esquema de destino precisam estar vazias; a versão Alembic
+deve ser o head atual. Nenhuma tabela é apagada ou recriada pelo importador.
+Use papel de migração proprietário das tabelas e sequences, separado do runtime.
+
+O operador deve interromper API, workers e simuladores tanto da origem quanto
+do destino durante a operação. `--offline-confirmed` registra essa declaração;
+o programa não consegue garantir que outro processo externo permaneça parado.
+Faça backup consistente antes do corte. Não migre dados reais sem autorização.
+Armazene a URL somente em variável de ambiente ou gerenciador de segredos,
+sem incluí-la em argumentos, logs ou histórico do shell.
+
+Com `ROSTER_IMPORT_TARGET` já configurada para o destino autorizado:
+
+```sh
+python -m church_roster_bot.scripts.migrate_sqlite \
+  --source /caminho/snapshot-offline.sqlite3 \
+  --target-env ROSTER_IMPORT_TARGET --schema public \
+  --report /caminho/novo-plano.json
+```
+
+O padrão é dry-run: transação PostgreSQL `REPEATABLE READ READ ONLY`, sem INSERT,
+DDL, nextval ou setval. O relatório inclui SHA256 da origem, revisão, contagens
+e fingerprints por tabela, identidade do destino e plano de sequences. Para
+esquemas antigos conhecidos, acrescente `--upgrade-copy` em todas as etapas;
+somente uma cópia temporária será atualizada.
+
+Confira o relatório e copie seu `plan_token` para a confirmação:
+
+```sh
+python -m church_roster_bot.scripts.migrate_sqlite \
+  --source /caminho/snapshot-offline.sqlite3 \
+  --target-env ROSTER_IMPORT_TARGET --schema public \
+  --report /caminho/novo-resultado.json \
+  --apply --offline-confirmed --confirm TOKEN_DO_PLANO
+```
+
+O token vincula conteúdo e identidade da origem, esquema, banco, usuário,
+instância PostgreSQL e estado do destino. Alterações nesses elementos exigem
+novo plano. O executor adquire advisory lock e locks de tabelas, verifica
+novamente o destino vazio e importa em uma transação. IDs, relações, datas,
+consentimentos, auditoria e estados de mensagens são preservados. Divergência
+de contagens ou de qualquer fingerprint reverte a operação.
+
+Sequences são reiniciadas com `ALTER SEQUENCE RESTART`, incluindo a conferência
+do próximo valor, na mesma transação das linhas. Evita-se `setval`, cuja alteração
+não é revertida como uma gravação comum. A implementação atual recusa sequences
+com incremento, cache ou ciclo não previstos, constraints diferidas, FKs com
+ações distintas dos modelos e índices inválidos. Consulte a documentação de
+[ALTER SEQUENCE](https://www.postgresql.org/docs/17/sql-altersequence.html) e de
+[funções de sequences](https://www.postgresql.org/docs/17/functions-sequence.html).
+
+Antes de religar a aplicação, confira o destino independentemente:
+
+```sh
+python -m church_roster_bot.scripts.migrate_sqlite \
+  --source /caminho/snapshot-offline.sqlite3 \
+  --target-env ROSTER_IMPORT_TARGET --schema public \
+  --report /caminho/nova-conferencia.json --verify
+```
+
+O modo verify é somente leitura: compara dados e verifica que o próximo ID não
+colide com os importados. Relatórios precisam ser arquivos novos e não são
+sobrescritos. Erros não incluem valores de registros, SQL ou credenciais.
+
+Se a conexão cair durante commit, o resultado é declarado incerto e não há
+retry automático. Faça verify antes de qualquer nova tentativa. Destino
+integralmente reconciliado indica importação concluída; destino vazio exige
+novo dry-run; conteúdo parcial ou diferente exige investigação do operador.
+A mesma cautela vale se houver falha ao escrever o relatório depois do commit.
+Não apague registros para forçar uma segunda execução. Estados de entrega
+incertos e eventos pendentes continuam preservados; não os marque como enviados
+ou retente transporte sem reconciliação com o provedor na etapa operacional.
+
+Os testes usam somente dados fictícios. Execute `pytest -q tests/test_transfer.py`
+com `TEST_DATABASE_URL` descartável para testar confirmação, CLI, precisão,
+versões antigas, importadores concorrentes, rollback de linhas e sequences e
+perda real de conexão durante transação e commit.
+
 ## Gates ainda em implementação
 
 Faltam ferramenta SQLite → PostgreSQL/dry-run, reconciliação, round trips de
