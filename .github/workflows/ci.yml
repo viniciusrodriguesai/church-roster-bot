@@ -24,6 +24,7 @@ jobs:
           --health-cmd "pg_isready -U roster -d roster_test"
           --health-interval 5s --health-timeout 3s --health-retries 10
     env:
+      APP_ENV: test
       TEST_DATABASE_URL: postgresql+psycopg://roster:test-only-password@localhost:5432/roster_test
       DATABASE_URL: postgresql+psycopg://roster:test-only-password@localhost:5432/roster_test
     steps:
@@ -46,3 +47,16 @@ jobs:
       - run: pytest -q
         env:
           POSTGRES_TEST_CONTAINER: ${{ job.services.postgres.id }}
+      - name: Validate operations after SQLite import
+        run: >-
+          pytest -q --migrate-roster-fixtures -m postgres
+          tests/test_distribution.py::test_coordinator_can_request_a_preview_in_the_real_router_without_assigning
+          tests/test_proposals.py::test_chat_can_save_review_and_cancel_a_draft_after_restart
+          tests/test_automation_offers.py
+          tests/test_monthly_opening.py::test_opens_at_configured_local_time_and_never_repeats_after_restart
+          tests/test_waitlist.py::test_full_slot_waits_then_notifies_first_entry_without_assigning
+          tests/test_automatic_replacements.py::test_automatically_invites_and_only_acceptance_replaces_original
+          tests/test_reminders.py::test_reminder_at_local_clock_is_utc_and_sent_once_across_restart
+          tests/test_emergencies.py::test_opt_in_policy_invites_only_inside_horizon_and_never_assigns_before_accept
+          tests/test_reports.py::test_report_includes_zero_load_volunteers_and_does_not_infer_attendance
+          tests/test_reports.py::test_other_ministry_participations_are_excluded_and_its_report_is_forbidden

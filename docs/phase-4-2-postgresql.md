@@ -1,6 +1,7 @@
 # Fase 4.2 — PostgreSQL e migração verificável
 
-Status: em desenvolvimento na feature/phase-4-production, base 5bfd27a.
+Implementação na `feature/phase-4-production`, a partir da base `5bfd27a`.
+A aprovação de cada execução é registrada por SHA no relatório externo da validação.
 Nenhum servidor externo ou banco original é alvo dos testes.
 
 ## Auditoria e arquitetura
@@ -13,6 +14,15 @@ deve descobrir todas as tabelas pelo metadata, não uma lista parcial de cadastr
 O head da Fase 4.1 é 431d9e6a8102; a Fase 3 terminava em 231e4c9a7308. A Fase 2
 tem esquemas em 88ca949752d6 e a27b6c1d4e90 (outbox dos convites). Não há
 necessidade demonstrada de novo esquema nesta fase.
+
+| Módulo | Responsabilidade |
+| --- | --- |
+| `core/database.py` | Política de conexão compartilhada e limites PostgreSQL |
+| `database/schema.py` | Revisões conhecidas e verificação física do esquema |
+| `database/source.py` | Snapshot SQLite somente leitura e atualização de cópia |
+| `database/canonical.py` | Tipos sem coerções silenciosas e fingerprints por tabela |
+| `database/transfer.py` | Plano autorizado, transação, locks e reconciliação |
+| `scripts/migrate_sqlite.py` | Interface do operador e relatório sem dados sensíveis |
 
 SQLite usa tipagem flexível, timestamps UTC sem offset na leitura e serialização
 de transações locais; não implementa locks de linha/FOR UPDATE. O PostgreSQL
@@ -91,8 +101,8 @@ pytest -q tests/test_transfer_canonical.py tests/test_transfer_schema.py \
   tests/test_transfer_source.py tests/test_migration_logging.py
 ```
 
-A ferramenta ainda em implementação será aprovada separadamente, incluindo
-transações reais, rollback, confirmação do destino e reconciliação pós-cópia.
+A preparação da origem é validada separadamente das transações reais, rollback,
+confirmação do destino e reconciliação pós-cópia descritos a seguir.
 
 ## Transferência controlada
 
@@ -176,6 +186,34 @@ com `TEST_DATABASE_URL` descartável para testar confirmação, CLI, precisão,
 versões antigas, importadores concorrentes, rollback de linhas e sequences e
 perda real de conexão durante transação e commit.
 
+### Desvios de visibilidade e geração de valores
+
+Destinos com RLS ou FORCE RLS são recusados: políticas de linha podem ocultar
+registros da comparação e tornar uma conferência de destino vazio incompleta.
+O modelo atual não utiliza essas políticas; a transferência não tenta removê-las
+ou contorná-las. A recusa vale inclusive quando o papel atual poderia ignorar RLS.
+
+Além da propriedade da sequence, a validação confere se o default da PK realmente
+executa `nextval` da sequence associada. Defaults ausentes, constantes ou ligados
+a outra sequence, identity, colunas geradas e defaults não previstos são desvios
+do contrato atual. A checagem lê os catálogos e compara expressões; não consome
+IDs. Isso evita aprovar a cópia com IDs explícitos e deixar novas inserções do
+aplicativo sem um gerador válido.
+
+As regressões PostgreSQL reproduziram oito desvios antes da correção e depois
+passaram junto com a aceitação do head normal. Veja as referências sobre
+[RLS](https://www.postgresql.org/docs/17/ddl-rowsecurity.html) e
+[informações de sequences](https://www.postgresql.org/docs/17/functions-info.html).
+
+A comparação também mantém as fronteiras de chamadas funcionais, sem confundir
+uma coluna com uma função ou funções aninhadas com um nome concatenado. Nomes
+entre aspas fora do contrato suportado são recusados. CHECKs e predicados de
+índices que dependam de funções ou operadores externos a `pg_catalog` também
+são recusados: o mesmo texto pode resolver para uma rotina sobrecarregada de
+outro esquema. A validação lê dependências do catálogo, sem executar essas
+rotinas. Essas garantias cobrem os modelos e revisões suportados; não substituem
+a revisão de configurações administrativas do servidor antes de um corte real.
+
 ## Backup e restauração em ambiente isolado
 
 Use clientes oficiais da mesma versão principal do servidor. O ensaio utiliza
@@ -219,8 +257,133 @@ Consulte os manuais de [pg_dump](https://www.postgresql.org/docs/17/app-pgdump.h
 [pg_restore](https://www.postgresql.org/docs/17/app-pgrestore.html) e
 [serviços libpq](https://www.postgresql.org/docs/17/libpq-pgservice.html).
 
-## Gates ainda em implementação
+## Critérios de aprovação
 
-Faltam ferramenta SQLite → PostgreSQL/dry-run, reconciliação, round trips de
-migração, backup/restauração oficial, testes após transferência e relatório final.
-Não considerar a fase concluída antes dessas verificações e da CI final aprovada.
+A conclusão exige Docker local e volume persistente verificados, cadeia Alembic
+válida, dry-run sem gravações, transferência e reconciliação das 28 tabelas,
+backup/restauração, concorrência real, continuidade das operações do aplicativo,
+preservação dos bancos originais, Ruff/formatação/segurança e CI final aprovada.
+O relatório de execução registra os resultados e pendências por SHA. Não
+considere um ensaio concluído por contagem de registros ou CI anterior.
+
+## Papéis e preparação de produção
+
+Separe desenvolvimento (`APP_ENV=development`), testes (`APP_ENV=test`, sempre
+`TEST_DATABASE_URL` descartável) e produção futura (`APP_ENV=production`). Não
+reutilize credenciais ou volumes de produção nos testes. O Compose é uma base
+local de desenvolvimento, sem representar disponibilidade, retenção ou segurança
+de um serviço gerenciado. `.env` existente nunca é sobrescrito por ferramentas
+de migração; no deploy futuro, use o mecanismo de segredos do provedor.
+
+O papel runtime precisa de CONNECT no banco, USAGE no esquema, DML nas tabelas
+e USAGE/SELECT nas sequences. Não precisa de superusuário, CREATEDB, CREATEROLE,
+REPLICATION, BYPASSRLS, propriedade de tabelas ou permissão para desativar FKs.
+Use papel separado e proprietário para Alembic e transferência; remova suas
+credenciais dos processos normais após a manutenção.
+
+Exemplo de grants para papéis já criados pelo operador em banco autorizado:
+
+```sql
+GRANT CONNECT ON DATABASE roster_test TO roster_runtime;
+GRANT USAGE ON SCHEMA public TO roster_runtime;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO roster_runtime;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO roster_runtime;
+ALTER DEFAULT PRIVILEGES FOR ROLE roster_migrator IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO roster_runtime;
+ALTER DEFAULT PRIVILEGES FOR ROLE roster_migrator IN SCHEMA public
+  GRANT USAGE, SELECT ON SEQUENCES TO roster_runtime;
+```
+
+Os privilégios padrão precisam ser configurados para o papel que efetivamente
+cria os objetos; grants sobre tabelas atuais não cobrem automaticamente tabelas
+futuras. Ajuste nomes e esquema ao ambiente, sem executar esses exemplos contra
+um banco existente sem autorização. A aplicação faz o isolamento de ministérios;
+o papel compartilhado de runtime não oferece isolamento por ministério no SQL.
+
+`tests/test_postgres_runtime_role.py` cria e remove apenas um papel fictício
+exclusivo, verificando seu OID. Testa cadastro com DML mínimo, recusa de DDL e
+de desativação de integridade, recusa do papel como importador, recuperação de
+conexão obsoleta com pre_ping e rollback após encerramento real de uma conexão
+durante transação. Não cria nem altera papéis de produção.
+
+Antes de configurar PostgreSQL gerenciado na próxima fase, valide host, CA e
+hostname de TLS (`sslmode=verify-full`), credenciais próprias, conectividade,
+privilégios e orçamento de conexões. O total inclui cada processo HTTP, worker,
+simulador, sondagem e manutenção; limite o número de processos junto com
+DB_POOL_SIZE/DB_MAX_OVERFLOW. Não há provisionamento de Render nesta fase.
+
+## Recuperação e riscos residuais
+
+Falha de conexão durante uma transação exige rollback e repetição da operação
+inteira conforme a política de inbox/worker, preservando deduplicação. pre_ping
+recupera checkout posterior, sem tornar uma transação interrompida transparente.
+Não repita automaticamente um envio de resultado incerto. Reconciliar entrega
+externa depende do provedor e não foi validado com a Meta real.
+
+O hash canônico preserva o contrato UTC do aplicativo; timestamps SQLite sem
+offset são interpretados como UTC. Se dados externos históricos não seguirem
+esse contrato, o operador deve investigar antes de autorizar a migração. A
+ferramenta não adivinha fusos, consentimentos, permissões nem corrige inconsistências
+históricas de negócio. Incompatibilidades estruturais ou de tipos são recusadas.
+
+O importador precisa de uma janela de manutenção e acesso aos scripts Alembic
+do checkout. Não faz sincronização contínua, merge de bancos ocupados, exportação
+de um SQLite com WAL ativo nem migração online. A origem deve ser um snapshot
+offline consistente. A senha/identidade do destino não prova por si só que ele
+é operacionalmente autorizado: a revisão do relatório e a confirmação do operador
+continuam obrigatórias. Não foi realizada importação de dados reais.
+
+O backup de ensaio comprova restauração do esquema do aplicativo e registros
+fictícios; não certifica backups antigos nem o conteúdo de volumes preexistentes.
+Criptografia, retenção, recuperação de desastre e ensaios operacionais periódicos
+continuam como trabalho de produção posterior. Testes aprovados não eliminam
+todos os riscos nem substituem revisão operacional antes do corte real.
+
+## Validação reproduzível
+
+Configure DATABASE_URL e TEST_DATABASE_URL exclusivamente para PostgreSQL
+descartável. Os testes criam e removem seus próprios esquemas, papéis e banco
+de restauração; não os execute em bancos originais ou serviços de produção.
+
+```sh
+python -m pip check
+alembic upgrade head
+alembic check
+ruff check .
+ruff format --check .
+bandit -r src
+pip-audit --progress-spinner off
+pytest -q
+```
+
+A suíte completa inclui SQLite, PostgreSQL, versões antigas, downgrade em
+ambientes descartáveis, concorrência e falhas reais de conexão. Os testes novos
+de backup usam clientes 17 nativos ou o ID explícito do serviço Docker de teste.
+Não precisam de Meta, Render, credenciais de produção ou serviços pagos.
+
+Para exercitar fluxos existentes depois de importar a base fictícia SQLite,
+use o modo optativo de fixture abaixo. Cada caso PostgreSQL cria um esquema
+novo, migra a base de configuração/coordenação e executa os fluxos reais sobre
+os IDs preservados. A massa histórica independente testa todas as 28 tabelas.
+
+```sh
+pytest -q --migrate-roster-fixtures -m postgres \
+  tests/test_distribution.py tests/test_proposals.py tests/test_automation_offers.py \
+  tests/test_monthly_opening.py tests/test_waitlist.py tests/test_automatic_replacements.py \
+  tests/test_reminders.py tests/test_emergencies.py tests/test_reports.py
+```
+
+Essa seleção ampla é opcional e mais demorada; o relatório identifica os casos
+representativos efetivamente executados. O padrão da suíte permanece inalterado.
+A CI também executa uma seleção de 30 casos representativos com a fixture
+migrada, em etapa separada da suíte completa e com `APP_ENV=test` explícito.
+Os testes de processos separados têm suas próprias fixtures de transferência.
+`tests/test_migrated_simulator_processes.py` inicia coordenador e dois voluntários
+em três processos reais compartilhando PostgreSQL, com transporte local. Verifica
+convite e aceite espontâneos, isolamento de destinatários, transcrições coladas,
+resposta repetida e reinício sem repetir mensagens. Evidências JSON opcionais,
+incluindo horários UTC, podem ser gravadas em `ROSTER_EVIDENCE_DIR`, fora do Git.
+
+Há um aviso de depreciação Starlette/httpx nos testes HTTP. Ele não é silenciado;
+uma futura atualização do transporte de teste precisa manter compatibilidade
+com FastAPI. Nenhum resultado aprovado é inferido somente de uma CI anterior.

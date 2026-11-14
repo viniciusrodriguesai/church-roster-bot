@@ -3,7 +3,7 @@ from datetime import time
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -16,16 +16,55 @@ from church_roster_bot.scheduling.engine import RosterEngine
 from church_roster_bot.services.models import Slot
 
 
+def pytest_addoption(parser):
+    parser.addoption(
+        "--migrate-roster-fixtures",
+        action="store_true",
+        default=False,
+        help="Build PostgreSQL roster fixtures by importing an isolated fictitious SQLite file",
+    )
+
+
 @pytest.fixture
 def roster(request, tmp_path):
     postgres = getattr(request, "param", "sqlite") == "postgres"
+    migrate = postgres and request.config.getoption("--migrate-roster-fixtures")
+    target_engine = None
     if postgres:
         url = os.getenv("TEST_DATABASE_URL")
         if not url:
             pytest.skip("set TEST_DATABASE_URL to a disposable PostgreSQL database")
         if not url.startswith("postgresql"):
             pytest.fail("TEST_DATABASE_URL must point to PostgreSQL")
-        engine = create_engine(url)
+        if migrate:
+            control = create_engine(url)
+            schema = "imported_fixture_" + uuid4().hex
+            with control.begin() as db:
+                db.exec_driver_sql(f'CREATE SCHEMA "{schema}"')
+                schema_oid = db.scalar(
+                    text("SELECT oid FROM pg_namespace WHERE nspname=:name"), {"name": schema}
+                )
+            target_url = make_url(url).update_query_dict({"options": "-csearch_path=" + schema})
+            target_engine = create_engine(target_url)
+
+            def cleanup_imported_schema():
+                target_engine.dispose()
+                with control.begin() as db:
+                    assert (
+                        db.scalar(
+                            text("SELECT oid FROM pg_namespace WHERE nspname=:name"),
+                            {"name": schema},
+                        )
+                        == schema_oid
+                    )
+                    db.exec_driver_sql(f'DROP SCHEMA "{schema}" CASCADE')
+                control.dispose()
+
+            request.addfinalizer(cleanup_imported_schema)
+            source_path = tmp_path / "fictitious-before-import.sqlite3"
+            engine = create_engine("sqlite:///" + source_path.as_posix())
+        else:
+            engine = create_engine(url)
     elif getattr(request, "param", "sqlite") == "sqlite_file":
         engine = create_engine(f"sqlite+pysqlite:///{tmp_path / 'terminal.sqlite3'}")
     else:
@@ -67,6 +106,31 @@ def roster(request, tmp_path):
             "offer": roles[2].id,
             "joint": roles[3].id,
         }
+    if migrate:
+        from alembic import command
+        from church_roster_bot.database.schema import migration_config
+        from church_roster_bot.database.transfer import transfer_sqlite
+
+        source_engine = engine
+        try:
+            with target_engine.begin() as db:
+                config = migration_config()
+                config.attributes["connection"] = db
+                command.upgrade(config, "head")
+            plan = transfer_sqlite(source_path, target_url, schema=schema)
+            report = transfer_sqlite(
+                source_path,
+                target_url,
+                schema=schema,
+                mode="apply",
+                confirmation=plan["plan_token"],
+                offline_confirmed=True,
+            )
+            assert report["source_tables"] == report["target_after"]
+            factory.configure(bind=target_engine)
+            engine = target_engine
+        finally:
+            source_engine.dispose()
     yield RosterEngine(factory), factory, ids
     if postgres:
         Base.metadata.drop_all(engine)

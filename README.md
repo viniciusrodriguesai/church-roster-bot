@@ -1,6 +1,6 @@
 # Church Roster Bot
 
-Bot open source para escalas de voluntários pelo WhatsApp. **Estado: Fases 1–3 integradas; código e auditoria da Fase 4.1 na branch de desenvolvimento. Nenhum número real da Meta foi conectado ou testado.** O Diaconato é o primeiro ministério. Não há painel web.
+Bot open source para escalas de voluntários pelo WhatsApp. **Estado: Fases 1–3 integradas; Fases 4.1 e 4.2 implementadas na branch de desenvolvimento. Nenhum número real da Meta foi conectado ou testado.** O Diaconato é o primeiro ministério. Não há painel web.
 
 ## O que funciona
 
@@ -25,7 +25,8 @@ No PowerShell, na pasta do projeto:
 ```powershell
 py -3.14 -m venv .venv
 .venv\Scripts\python.exe -m pip install -e '.[dev]'
-$env:DATABASE_URL='sqlite+pysqlite:///demo.sqlite3'
+$simulationDb = Join-Path ([System.IO.Path]::GetTempPath()) ("church-roster-simulation-" + [guid]::NewGuid().ToString('N') + '.sqlite3')
+$env:DATABASE_URL = 'sqlite+pysqlite:///' + $simulationDb.Replace('\', '/')
 .venv\Scripts\alembic.exe upgrade head
 .venv\Scripts\python.exe -m church_roster_bot.scripts.seed_demo
 .venv\Scripts\python.exe -m church_roster_bot.scripts.seed_simulation
@@ -35,6 +36,10 @@ $env:DATABASE_URL='sqlite+pysqlite:///demo.sqlite3'
 Digite `Oi`, depois os IDs exibidos no menu. O coordenador fictício usa `+15550100000`; o administrador geral fictício usa `+15550109999`; os oito voluntários usam `+15550100001` até `+15550100008`. Esses números são **dados sintéticos exclusivamente para a simulação**. Execute o simulador em outro terminal com `--phone +15550100000` para administrar cultos. Respostas de botões e listas podem ser digitadas pelo ID mostrado. A função `simulate(..., reply_kind="button_reply" | "list_reply")` também gera esses eventos em testes.
 
 SQLite serve apenas para a simulação local rápida; o PostgreSQL é o banco de produção e do teste de concorrência. A CI exercita a migração e os testes no PostgreSQL.
+
+O exemplo cria um caminho temporário exclusivo a cada execução. Para os terminais
+compartilharem a mesma simulação, copie o mesmo `DATABASE_URL` para todos eles.
+Não execute seeds ou migrações sobre `demo.sqlite3` ou outros bancos existentes.
 
 Para testar convites excepcionais, envie `INICIAR` no terminal do voluntário fictício e inscreva-o em dois dias distintos do mês. No terminal do coordenador, escolha `7`, digite `EXCECAO <id_voluntario> <id_vaga>`, informe a justificativa e confirme com `SIM`. O terminal do voluntário mostra o convite automaticamente enquanto aguarda texto. Responda `ACEITAR <id>` ou `RECUSAR <id>`; o coordenador recebe o resultado automaticamente. `7` → `LISTAR` mostra o estado dos envios pendentes, bloqueados ou com falha.
 
@@ -55,6 +60,18 @@ docker compose up -d db
 ```
 
 Em outro processo, após configurar a Meta, execute `python -m church_roster_bot.notifications.worker`. O webhook responde após gravar o evento no banco; o worker processa o fluxo e envia a resposta. Mantenha **uma instância do worker** nesta fase. O endpoint `/health` verifica somente o processo HTTP. Para iniciar uma igreja real, o operador confiável cria o primeiro administrador com `python -m church_roster_bot.scripts.bootstrap_admin --church-id <id>`; o script pede o número localmente. A partir daí, a gestão ocorre no WhatsApp.
+
+## PostgreSQL e migração da Fase 4.2
+
+A [documentação da Fase 4.2](docs/phase-4-2-postgresql.md) descreve pool e
+timeouts, TLS para produção futura, papéis mínimos, transferência SQLite para
+PostgreSQL, dry-run, confirmação do destino, reconciliação, backup e restauração.
+O importador exige esquema atualizado e vazio; a origem permanece somente leitura.
+Não há migração de dados reais nem configuração de servidor externo nesta fase.
+
+Os testes de backup precisam de clientes PostgreSQL 17 ou Docker com
+`POSTGRES_TEST_CONTAINER` explicitamente apontando para o contêiner descartável.
+Nunca use um contêiner ou banco que contenha dados existentes.
 
 ## Health checks e auditoria da Fase 4.1
 
