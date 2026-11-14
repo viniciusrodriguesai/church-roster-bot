@@ -74,7 +74,13 @@ def historical_sqlite(path):
                 "volunteer_id": 17,
                 "exception_id": 17,
                 "status": "replacement_requested",
-            }
+            },
+            {
+                "slot_id": 17,
+                "volunteer_id": 17,
+                "status": "cancelled",
+                "created_at": now - timedelta(days=3) + timedelta(hours=1),
+            },
         ],
         "replacement_requests": [{"assignment_id": 17, "status": "pending"}],
         "monthly_schedules": [
@@ -106,10 +112,60 @@ def historical_sqlite(path):
                 "slot_id": 17,
                 "volunteer_id": 18,
                 "replacement_request_id": 17,
+                "status": "pending",
                 "reason": "Troca fictícia",
                 "service_fingerprint": "a" * 64,
                 "expires_at": now + timedelta(hours=24),
-            }
+            },
+            {
+                "kind": "emergency",
+                "source_key": "fictitious-18",
+                "slot_id": 17,
+                "volunteer_id": 17,
+                "assignment_id": 18,
+                "status": "accepted",
+                "reason": "Convite histórico aceito antes do cancelamento da participação",
+                "service_fingerprint": "a" * 64,
+                "created_at": now - timedelta(days=3),
+                "expires_at": now - timedelta(days=2),
+                "responded_at": now - timedelta(days=3) + timedelta(hours=1),
+            },
+            {
+                "kind": "emergency",
+                "source_key": "fictitious-19",
+                "slot_id": 17,
+                "volunteer_id": 17,
+                "status": "declined",
+                "reason": "Convite histórico recusado",
+                "service_fingerprint": "a" * 64,
+                "created_at": now - timedelta(days=2),
+                "expires_at": now - timedelta(days=1),
+                "responded_at": now - timedelta(days=2) + timedelta(hours=2),
+            },
+            {
+                "kind": "emergency",
+                "source_key": "fictitious-20",
+                "slot_id": 17,
+                "volunteer_id": 17,
+                "status": "expired",
+                "reason": "Convite histórico expirado sem resposta",
+                "service_fingerprint": "a" * 64,
+                "created_at": now - timedelta(days=2),
+                "expires_at": now - timedelta(days=1),
+                "responded_at": now - timedelta(days=1),
+            },
+            {
+                "kind": "emergency",
+                "source_key": "fictitious-21",
+                "slot_id": 17,
+                "volunteer_id": 17,
+                "status": "cancelled",
+                "reason": "Convite histórico cancelado",
+                "service_fingerprint": "a" * 64,
+                "created_at": now - timedelta(days=2),
+                "expires_at": now - timedelta(days=1),
+                "responded_at": now - timedelta(days=2) + timedelta(hours=3),
+            },
         ],
         "waitlist_entries": [
             {
@@ -152,10 +208,57 @@ def historical_sqlite(path):
                 "recipient_e164": "+15550100002",
                 "volunteer_id": 18,
                 "automation_invitation_id": 17,
-                "status": "uncertain",
+                "status": "unknown",
+                "attempts": 1,
+                "error_code": "network_ambiguous",
                 "dedupe_key": "fictitious-notice-17",
                 "payload": {"body": "Convite fictício"},
-            }
+            },
+            {
+                "recipient_e164": "+15550100001",
+                "volunteer_id": 17,
+                "status": "pending",
+                "dedupe_key": "fictitious-notice-18",
+                "payload": {"body": "Aviso fictício pendente"},
+            },
+            {
+                "recipient_e164": "+15550100001",
+                "volunteer_id": 17,
+                "automation_invitation_id": 18,
+                "status": "sent",
+                "attempts": 1,
+                "meta_message_id": "wamid.fictitious-sent-19",
+                "dedupe_key": "fictitious-notice-19",
+                "payload": {"body": "Convite fictício enviado"},
+                "created_at": now - timedelta(days=3),
+            },
+            {
+                "recipient_e164": "+15550100001",
+                "volunteer_id": 17,
+                "status": "failed",
+                "attempts": 1,
+                "error_code": "credentials_missing",
+                "dedupe_key": "fictitious-notice-20",
+                "payload": {"body": "Aviso fictício com falha"},
+                "created_at": now - timedelta(days=2),
+            },
+            {
+                "recipient_e164": "+15550100002",
+                "volunteer_id": 18,
+                "status": "blocked_consent",
+                "error_code": "consent_required",
+                "dedupe_key": "fictitious-notice-21",
+                "payload": {"body": "Aviso fictício sem consentimento"},
+            },
+            {
+                "recipient_e164": "+15550100001",
+                "volunteer_id": 17,
+                "status": "blocked_window",
+                "error_code": "template_required",
+                "dedupe_key": "fictitious-notice-22",
+                "payload": {"body": "Aviso fictício fora da janela"},
+                "created_at": now - timedelta(days=2),
+            },
         ],
         "audit_events": [
             {
@@ -192,7 +295,7 @@ def historical_sqlite(path):
                         values["id"] = 17 + offset
                     for name in ("created_at", "updated_at"):
                         if name in table.c:
-                            values[name] = now
+                            values.setdefault(name, now)
                     db.execute(table.insert().values(**values))
             # The raw SQLite representation must retain precision before either
             # SQLAlchemy's usual JSON float parser or PostgreSQL sees the value.

@@ -70,10 +70,33 @@ def test_dry_run_full_import_reconciliation_and_next_ids(prepared):
             )
             == 18
         )
-        assert db.scalar(text("SELECT status FROM outbound_messages")) == "uncertain"
+        assert dict(
+            db.execute(
+                text("SELECT status,count(*) FROM automation_invitations GROUP BY status")
+            ).all()
+        ) == {"pending": 1, "accepted": 1, "declined": 1, "expired": 1, "cancelled": 1}
+        assert dict(
+            db.execute(text("SELECT status,count(*) FROM outbound_messages GROUP BY status")).all()
+        ) == {
+            "pending": 1,
+            "sent": 1,
+            "failed": 1,
+            "unknown": 1,
+            "blocked_consent": 1,
+            "blocked_window": 1,
+        }
+        assert tuple(
+            db.execute(
+                text(
+                    "SELECT i.assignment_id,a.status FROM automation_invitations i "
+                    "JOIN assignments a ON a.id=i.assignment_id WHERE i.id=18"
+                )
+            ).one()
+        ) == (18, "cancelled")
+        assert db.scalar(text("SELECT status FROM outbound_messages WHERE id=17")) == "unknown"
         assert db.scalar(text("SELECT invite_opt_in FROM volunteers WHERE id=18")) is False
         assert "123456789012345678901234567890" in db.scalar(
-            text("SELECT details::text FROM audit_events")
+            text("SELECT details::text FROM audit_events WHERE id=17")
         )
 
 
