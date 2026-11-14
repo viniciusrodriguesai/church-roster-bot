@@ -52,7 +52,32 @@ def sql_signature(value: str) -> str:
     # executable SQL. Normalize PostgreSQL's equivalent deparser output only.
     pieces = re.split(r"('(?:[^']|'')*')", value)
     for i in range(0, len(pieces), 2):
-        pieces[i] = pieces[i].lower().replace('"', "")
+        # Quoted identifiers must retain the same lexical meaning after removing
+        # quotes. The current schema only uses simple lowercase ASCII names.
+        quoted = r'"((?:[^"]|"")*)"'
+        for identifier in re.findall(quoted, pieces[i]):
+            if not re.fullmatch(r"[a-z_][a-z0-9_]*", identifier) or identifier in {
+                "and",
+                "or",
+                "not",
+                "in",
+                "any",
+                "all",
+                "array",
+                "between",
+                "from",
+                "trim",
+                "both",
+                "is",
+                "null",
+                "true",
+                "false",
+            }:
+                raise TransferError("unsupported_schema_expression")
+        pieces[i] = re.sub(quoted, lambda match: match[1], pieces[i])
+        if '"' in pieces[i]:
+            raise TransferError("unsupported_schema_expression")
+        pieces[i] = pieces[i].lower()
         # Current checks only combine predicates with AND. Removing redundant
         # deparser parentheses is safe for those, but would erase the meaning
         # of AND/OR grouping. Fail closed for unsupported boolean expressions.
@@ -66,10 +91,22 @@ def sql_signature(value: str) -> str:
         r"\1>=\2 and \1<=\3",
         value,
     )
-    value = value.replace("btrim(", "trim(")
     parts = re.split(r"('(?:[^']|'')*')", value)
     for i in range(0, len(parts), 2):
-        parts[i] = re.sub(r"[\s()]", "", parts[i]).replace("trimbothfrom", "trim")
+        parts[i] = re.sub(r"\b(?:btrim|trim)\s*\(\s*(?:both\s+from\s+)?", "trim(", parts[i])
+        # Preserve function-call boundaries before removing redundant grouping.
+        # Otherwise capacity() and capacity, or length(trim(...)) and
+        # lengthtrim(...), would receive identical signatures.
+        parts[i] = re.sub(
+            r"\b([a-z_][a-z0-9_]*)\s*\(",
+            lambda match: (
+                match[0]
+                if match[1] in {"and", "in", "any", "array", "between", "from"}
+                else match[1] + "@("
+            ),
+            parts[i],
+        )
+        parts[i] = re.sub(r"[\s()]", "", parts[i])
     value = "".join(parts)
     return re.sub(r"=anyarray\[([^]]*)\]", r"in\1", value)
 
@@ -272,6 +309,27 @@ def validate_postgres(connection, schema: str) -> None:
     if versions != [head_revision()]:
         raise TransferError("target_revision_mismatch")
     require_schema(physical_schema(connection, schema), model_schema(connection, schema))
+    # Textually equal expressions can bind to user-defined overloads. Current
+    # CHECKs and index predicates only depend on pg_catalog functions/operators.
+    if connection.scalar(
+        text(
+            "WITH expression_objects AS ("
+            "SELECT c.oid, 'pg_constraint'::regclass AS catalog "
+            "FROM pg_constraint c JOIN pg_namespace n ON n.oid=c.connamespace "
+            "WHERE n.nspname=:schema AND c.contype='c' "
+            "UNION ALL SELECT r.oid, 'pg_class'::regclass "
+            "FROM pg_class r JOIN pg_namespace n ON n.oid=r.relnamespace "
+            "WHERE n.nspname=:schema AND r.relkind IN ('i','I')) "
+            "SELECT count(*) FROM expression_objects e "
+            "JOIN pg_depend d ON d.classid=e.catalog AND d.objid=e.oid "
+            "LEFT JOIN pg_proc p ON d.refclassid='pg_proc'::regclass AND d.refobjid=p.oid "
+            "LEFT JOIN pg_operator o ON d.refclassid='pg_operator'::regclass "
+            "AND d.refobjid=o.oid "
+            "WHERE COALESCE(p.pronamespace,o.oprnamespace)<>'pg_catalog'::regnamespace"
+        ),
+        {"schema": schema},
+    ):
+        raise TransferError("unexpected_schema_dependencies")
     _validate_column_generators(connection, schema)
     bad = connection.scalar(
         text(
