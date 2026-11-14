@@ -210,9 +210,58 @@ def revision_schema(revision: str) -> dict:
         engine.dispose()
 
 
+def _validate_column_generators(connection, schema: str) -> None:
+    generators = connection.execute(
+        text(
+            "SELECT r.relname AS table_name, a.attname AS column_name, "
+            "a.attidentity AS identity_kind, a.attgenerated AS generated_kind, "
+            "pg_get_expr(d.adbin,d.adrelid) AS default_sql, "
+            "pg_get_serial_sequence(format('%I.%I',n.nspname,r.relname),a.attname) "
+            "AS serial_sequence, "
+            "format('nextval(%L::regclass)', "
+            "pg_get_serial_sequence(format('%I.%I',n.nspname,r.relname),a.attname)"
+            "::regclass::text) AS serial_default_sql "
+            "FROM pg_attribute a JOIN pg_class r ON r.oid=a.attrelid "
+            "JOIN pg_namespace n ON n.oid=r.relnamespace "
+            "LEFT JOIN pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum "
+            "WHERE n.nspname=:schema AND r.relkind IN ('r','p') "
+            "AND a.attnum>0 AND NOT a.attisdropped"
+        ),
+        {"schema": schema},
+    ).mappings()
+    for generator in generators:
+        if generator["table_name"] not in Base.metadata.tables:
+            continue
+        table = Base.metadata.tables[generator["table_name"]]
+        column = table.c[generator["column_name"]]
+        # Current models only generate values through SERIAL primary keys.
+        # Ownership alone does not prove that the column still uses its sequence.
+        if (
+            generator["identity_kind"]
+            or generator["generated_kind"]
+            or (
+                (
+                    not generator["serial_sequence"]
+                    or generator["default_sql"] != generator["serial_default_sql"]
+                )
+                if column is table.autoincrement_column
+                else generator["default_sql"] is not None
+            )
+        ):
+            raise TransferError("unexpected_column_generator", table=table.name, column=column.name)
+
+
 def validate_postgres(connection, schema: str) -> None:
     if connection.dialect.name != "postgresql":
         raise TransferError("postgresql_target_required")
+    if connection.scalar(
+        text(
+            "SELECT count(*) FROM pg_class r JOIN pg_namespace n ON n.oid=r.relnamespace "
+            "WHERE n.nspname=:schema AND (r.relrowsecurity OR r.relforcerowsecurity)"
+        ),
+        {"schema": schema},
+    ):
+        raise TransferError("unexpected_row_security")
     inspector = inspect(connection)
     if "alembic_version" not in inspector.get_table_names(schema=schema):
         raise TransferError("target_revision_required")
@@ -223,6 +272,7 @@ def validate_postgres(connection, schema: str) -> None:
     if versions != [head_revision()]:
         raise TransferError("target_revision_mismatch")
     require_schema(physical_schema(connection, schema), model_schema(connection, schema))
+    _validate_column_generators(connection, schema)
     bad = connection.scalar(
         text(
             "SELECT count(*) FROM pg_constraint c JOIN pg_namespace n ON n.oid=c.connamespace "
