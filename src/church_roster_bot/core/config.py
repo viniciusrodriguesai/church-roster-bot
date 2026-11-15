@@ -1,4 +1,5 @@
 import re
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, SecretStr, field_validator, model_validator
@@ -21,6 +22,7 @@ class Settings(BaseSettings):
     db_pool_recycle_seconds: int = Field(default=1800, ge=30, le=86400)
     whatsapp_access_token: SecretStr = SecretStr("")
     whatsapp_delivery_enabled: bool = True
+    worker_heartbeat_file: Path | None = None
     whatsapp_phone_number_id: str = ""
     whatsapp_verify_token: SecretStr = SecretStr("")
     meta_app_secret: SecretStr = SecretStr("")

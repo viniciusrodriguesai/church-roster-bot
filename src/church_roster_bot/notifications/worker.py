@@ -1,6 +1,7 @@
 """Run one durable inbox event and one outbound attempt at a time."""
 
 import logging
+import signal
 import time
 
 import httpx
@@ -49,6 +50,11 @@ class Worker:
         self.bot = Bot(session_factory, config)
         self._current_event_id: int | None = None
         self._maintenance_after = 0.0
+        self._stop_requested = False
+
+    def request_stop(self) -> None:
+        """Finish the current transaction/delivery before leaving the loop."""
+        self._stop_requested = True
 
     def process_one(self) -> bool:
         self._current_event_id = None
@@ -249,7 +255,7 @@ class Worker:
 
     def run_forever(self, interval: float = 1.0) -> None:
         recovery_needed = True
-        while True:
+        while not self._stop_requested:
             try:
                 if recovery_needed:
                     self.recover_sending()
@@ -257,6 +263,8 @@ class Worker:
                 progressed = self.maintain()
                 progressed = self.process_one() or progressed
                 progressed = self.send_one() or progressed
+                if self.config.worker_heartbeat_file is not None:
+                    self.config.worker_heartbeat_file.touch()
                 if not progressed:
                     time.sleep(interval)
             except Exception as exc:
@@ -294,4 +302,7 @@ class Worker:
 
 
 if __name__ == "__main__":
-    Worker().run_forever()
+    worker = Worker()
+    signal.signal(signal.SIGTERM, lambda *_: worker.request_stop())
+    signal.signal(signal.SIGINT, lambda *_: worker.request_stop())
+    worker.run_forever()
