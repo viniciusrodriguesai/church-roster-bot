@@ -49,6 +49,11 @@ Mantenha os dois terminais abertos e digite somente uma mensagem por vez, sem co
 
 ## PostgreSQL e servidor
 
+A [Fase 4.3 na HostHatch x86_64](docs/phase-4-3-hosthatch.md) prepara Docker,
+PostgreSQL 17 com TLS, FastAPI, worker único, Caddy e backup externo cifrado.
+O Compose de produção é separado do desenvolvimento; publicação, alterações
+críticas e ativação dos backups dependem de revisão e autorização operacional.
+
 Configure a senha local em `.env` e no `DATABASE_URL` antes de usar o Compose. O arquivo `.env.example` contém somente exemplos. Com Docker Desktop ativo:
 
 ```powershell

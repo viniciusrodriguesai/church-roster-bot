@@ -1,0 +1,13 @@
+[Unit]
+Description=Church Roster operational health checks
+After=docker.service
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/bin/bash /opt/church-roster-bot/deploy/check-health.sh
+TimeoutStartSec=60
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true

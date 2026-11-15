@@ -11,3 +11,6 @@ __pycache__/
 *.db
 *.sqlite3
 *.sqlite
+deploy/secrets/
+deploy/state/
+deploy/backups/

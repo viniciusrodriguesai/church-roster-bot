@@ -1,0 +1,10 @@
+[Unit]
+Description=Check Church Roster every five minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+Unit=church-roster-health.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,187 @@
+name: church-roster-production
+
+x-logging: &logging
+  driver: local
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-app: &app
+  image: church-roster-bot:${RELEASE_TAG:?Set an immutable release tag}
+  build:
+    context: ..
+  restart: unless-stopped
+  init: true
+  read_only: true
+  user: "10001:10001"
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  tmpfs: ["/tmp:size=32m,noexec,nosuid,nodev"]
+  environment:
+    APP_ENV: production
+    WHATSAPP_DELIVERY_ENABLED: "false"
+    WHATSAPP_ACCESS_TOKEN: ""
+    WHATSAPP_PHONE_NUMBER_ID: ""
+    META_APP_SECRET: ""
+    WHATSAPP_VERIFY_TOKEN: ""
+    DB_POOL_SIZE: "2"
+    DB_MAX_OVERFLOW: "0"
+  secrets:
+    - source: runtime_database_url
+      target: database_url
+  volumes:
+    - ./state/tls/ca.crt:/run/roster/ca.crt:ro
+  networks: [database]
+  logging: *logging
+  pids_limit: 100
+  mem_limit: 384m
+  cpus: 0.50
+  stop_grace_period: 60s
+  depends_on:
+    db:
+      condition: service_healthy
+
+services:
+  db:
+    image: postgres:17-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: roster
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --auth-local=trust
+    secrets:
+      - postgres_password
+      - migrator_password
+      - runtime_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres-init.sh:/docker-entrypoint-initdb.d/10-roster.sh:ro
+      - ./pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - ./state/tls/server.crt:/run/roster/server.crt:ro
+      - ./state/tls/server.key:/run/roster/server.key:ro
+    command:
+      - postgres
+      - -c
+      - ssl=on
+      - -c
+      - ssl_cert_file=/run/roster/server.crt
+      - -c
+      - ssl_key_file=/run/roster/server.key
+      - -c
+      - hba_file=/etc/postgresql/pg_hba.conf
+      - -c
+      - max_connections=30
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - work_mem=4MB
+      - -c
+      - max_wal_size=512MB
+      - -c
+      - log_statement=none
+      - -c
+      - log_min_error_statement=panic
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U postgres -d roster']
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    networks: [database]
+    logging: *logging
+    mem_limit: 1200m
+    cpus: 0.75
+    pids_limit: 100
+    shm_size: 256m
+    stop_grace_period: 90s
+
+  api:
+    <<: *app
+    networks: [database, frontend]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  worker:
+    <<: *app
+    # A fixed name also makes Compose refuse --scale worker=2.
+    container_name: church-roster-single-worker
+    command: [python, -m, church_roster_bot.notifications.worker]
+    environment:
+      APP_ENV: production
+      WHATSAPP_DELIVERY_ENABLED: "false"
+      WHATSAPP_ACCESS_TOKEN: ""
+      WHATSAPP_PHONE_NUMBER_ID: ""
+      META_APP_SECRET: ""
+      WHATSAPP_VERIFY_TOKEN: ""
+      DB_POOL_SIZE: "2"
+      DB_MAX_OVERFLOW: "0"
+      WORKER_HEARTBEAT_FILE: /tmp/worker.heartbeat
+    healthcheck:
+      test: [CMD, python, -c, "from pathlib import Path; import time; assert time.time() - Path('/tmp/worker.heartbeat').stat().st_mtime < 120"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  migrate:
+    <<: *app
+    profiles: [maintenance]
+    restart: "no"
+    command: [alembic, upgrade, head]
+    secrets:
+      - source: migrator_database_url
+        target: database_url
+
+  caddy:
+    image: caddy:2-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
+    restart: unless-stopped
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?Set the approved HTTPS hostname or IP}
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:80:80"
+      - "${BIND_ADDRESS:-127.0.0.1}:443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [frontend, internet]
+    logging: *logging
+    read_only: true
+    tmpfs: ["/tmp:size=16m,noexec,nosuid,nodev"]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    mem_limit: 192m
+    cpus: 0.25
+    pids_limit: 100
+    depends_on:
+      api:
+        condition: service_healthy
+
+networks:
+  database:
+    internal: true
+  frontend:
+    internal: true
+  internet: {}
+
+volumes:
+  postgres_data: {}
+  caddy_data: {}
+  caddy_config: {}
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password
+  migrator_password:
+    file: ./secrets/migrator_password
+  runtime_password:
+    file: ./secrets/runtime_password
+  runtime_database_url:
+    file: ./secrets/runtime_database_url
+  migrator_database_url:
+    file: ./secrets/migrator_database_url

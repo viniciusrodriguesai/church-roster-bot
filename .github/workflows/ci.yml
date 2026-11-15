@@ -8,6 +8,31 @@ permissions:
   contents: read
 
 jobs:
+  production-stack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      APP_ENV: test
+      DATABASE_URL: 'sqlite+pysqlite:///:memory:'
+      RUN_PRODUCTION_STACK_TEST: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --upgrade 'pip>=26.2.2,<27'
+      - run: python -m pip install -e '.[dev,security]'
+      - run: pip-audit -r deploy/requirements.lock --no-deps --disable-pip --progress-spinner off
+      - run: docker build -t church-roster-bot:phase43-validation .
+      - name: Validate Linux shell syntax
+        run: >-
+          docker run --rm --network none --entrypoint bash
+          -v "$PWD:/source:ro" postgres:17-bookworm
+          -c 'for script in /source/deploy/*.sh; do bash -n "$script" || exit; done'
+      - run: pytest -q tests/test_deployment_stack.py
+
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 15

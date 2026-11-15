@@ -1,0 +1,22 @@
+[Unit]
+Description=Encrypted external Church Roster database backup
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/bin/bash /opt/church-roster-bot/deploy/backup.sh
+TimeoutStartSec=30min
+Nice=10
+IOSchedulingClass=idle
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+# rclone must atomically refresh its OAuth configuration without printing tokens.
+ReadWritePaths=/var/lib/church-roster-backup /run/lock /root/.cache/restic /etc/church-roster
+PrivateTmp=true
+
+# Installation must create the writable directories before enabling the timer.

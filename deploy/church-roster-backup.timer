@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Church Roster backup
+
+[Timer]
+OnCalendar=*-*-* 03:15:00 UTC
+RandomizedDelaySec=15m
+Persistent=true
+Unit=church-roster-backup.service
+
+[Install]
+WantedBy=timers.target

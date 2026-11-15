@@ -1,0 +1,22 @@
+{
+	admin off
+}
+
+{$SITE_ADDRESS} {
+	header {
+		-Server
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+	}
+	request_body {
+		max_size 256KB
+	}
+	@allowed path /health /health/live /health/ready /webhooks/whatsapp
+	handle @allowed {
+		reverse_proxy api:8000
+	}
+	handle {
+		respond 404
+	}
+	# Access logs intentionally disabled: webhook verification uses query secrets.
+}
