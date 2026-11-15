@@ -2,22 +2,24 @@
 
 ## Estado operacional em 15/11/2026
 
-**Preparação implementada e ensaiada localmente. A aplicação ainda não foi
-instalada/publicada na VPS. A fase operacional permanece incompleta.**
+**Ensaio privado implantado e saudável na VPS, somente com dados fictícios.
+Backup externo e endurecimento SSH ainda precisam ser concluídos.**
 
 O proprietário escolheu não aplicar o endurecimento SSH neste momento
-(resposta: “Ainda não aplicar”). Essa decisão não autoriza instalação de
-Docker, exposição de portas ou publicação. Nenhuma alteração de configuração,
-pacotes, serviços, firewall, banco ou volume foi realizada na VPS nesta execução.
-O acesso SSH foi usado somente para inspeções/validações e a sessão root
-temporária de recuperação foi encerrada.
+(resposta: “Ainda não aplicar”). Posteriormente, o proprietário autorizou
+explicitamente instalar Docker Engine e Compose. Essa instalação foi executada
+e validada, como registrado abaixo; SSH, regras UFW, bancos e dados existentes
+foram preservados. A sessão root temporária de recuperação foi encerrada após
+validar novo acesso administrativo. Depois da CI aprovada, o proprietário
+autorizou o ensaio privado na VPS e a configuração de backups cifrados no Drive.
+Exposição pública continua sem autorização.
 
-## Inspeção do destino
+## Inspeção inicial do destino (antes da instalação autorizada)
 
 Inspeção via OpenSSH existente, chave Ed25519 no agente do Windows, sem abrir
 ou copiar chave privada. A autenticação de `rosteradmin` foi verificada em
-conexões independentes. Root também aceita a chave existente; foi utilizado
-apenas para leituras privilegiadas. `sudo -n` pede senha para rosteradmin;
+conexões independentes. Root também aceita a chave existente; inicialmente foi
+utilizado apenas para leituras privilegiadas. `sudo -n` pede senha para rosteradmin;
 `sudo -l -U rosteradmin` confirmou sua permissão administrativa.
 
 | Item | Evidência |
@@ -41,6 +43,27 @@ apenas para leituras privilegiadas. `sudo -n` pede senha para rosteradmin;
 `sshd -T` mostra root bloqueado, autenticação por chave preservada, senha e
 keyboard-interactive desativados, MaxAuthTries 3 e keepalive 60/3.
 
+## Docker instalado com autorização
+
+O proprietário respondeu “Autorizo instalar Docker e Compose”. Mantida uma
+sessão root de recuperação e preservados iptables, ip6tables e `/etc/ufw` em
+`/root/roster-docker-recovery.y1nPlUyd` (root-only). O instalador verificou
+Ubuntu/arquitetura, ausência de instalação existente, espaço, chave pública do
+repositório Docker e assinatura APT; nenhum pacote foi removido ou atualizado.
+
+- Docker Engine/CLI 29.9.3; Compose 5.7.1; containerd 2.4.2;
+  Buildx 0.39.0. Serviços Docker e containerd habilitados e ativos.
+- Driver de logs local com limite 10 MB × 3 e live-restore configurados antes
+  do primeiro início. rosteradmin não foi adicionado ao grupo docker.
+- `hello-world` amd64 executado em contêiner descartável sem rede, sem volume,
+  com filesystem somente leitura e limites de memória/PIDs.
+- Novo SSH como rosteradmin passou; UFW continua somente 22/tcp IPv4/IPv6;
+  somente SSH público em `ss -lnt`; nenhum serviço falho.
+- Aproximadamente 2,5 GiB usados e 15 GiB livres após instalação. Sem contêineres
+  ou volumes de aplicação; imagem de teste hello-world conservada.
+- Sem reboot, restart de SSH, abertura de portas ou alteração da política SSH.
+  APT indicou que nenhum serviço precisava de reinício.
+
 ## Implementação preparada
 
 - Dockerfile x86_64 compatível, Python 3.12, UID 10001, dependências runtime
@@ -54,12 +77,53 @@ keyboard-interactive desativados, MaxAuthTries 3 e keepalive 60/3.
   se credenciais forem introduzidas por engano.
 - Preparação de segredos/CA recusa diretórios existentes e não imprime valores.
 - Scripts revisáveis de instalação Docker e SSH com bloqueio por aprovação;
-  SSH inclui rollback de cinco minutos. Nenhum deles foi aplicado na VPS.
+  Docker foi aplicado após autorização; SSH inclui rollback de cinco minutos
+  e permanece adiado.
 - Backup restic cifrado e timers systemd preparados. Destino escolhido pelo
   proprietário: Google Drive existente, via rclone e escopo drive.file.
   OAuth, quota, envio, recuperação da senha e ativação continuam pendentes.
 - Verificações de saúde, espaço, heartbeat, expiração TLS e idade do backup
   preparadas, sem habilitar serviços nem enviar alertas.
+
+## Ensaio privado implantado após CI aprovada
+
+Release `9062092`, arquivo de fonte gerado por git archive e SHA-256 conferido
+após transferência, sem `.env`, bancos locais, chaves ou dados não rastreados.
+Instalação nova em `/opt/church-roster-bot`, configuração root-only em
+`/etc/church-roster`, sem sobrescrever diretório ou volume preexistente.
+
+- Imagem construída na VPS com dependências fixadas; segredos gerados no próprio
+  servidor sem exibi-los. TLS do PostgreSQL verificado para o hostname `db`.
+- Migrações até `431d9e6a8102`; `alembic check` sem operações pendentes.
+- Seeds exclusivamente fictícios: oito voluntários e 13 cultos em dezembro/2026.
+- PostgreSQL, FastAPI e worker saudáveis. Caddy responde HTTPS com CA local
+  validada; `/health/ready` retorna status ok e `/openapi.json` retorna 404.
+- Conexão real do runtime usa papel roster_runtime e SSL; sem CREATE no esquema.
+  Transporte Meta desativado e credenciais Meta vazias, confirmados no processo.
+- Somente Caddy publica 127.0.0.1:80 e 127.0.0.1:443. Testes TCP do Windows:
+  22 acessível; 80, 443, 8000 e 5432 inacessíveis externamente. UFW preservado.
+- Aproximadamente 3,7 GiB usados e 14 GiB livres; 3146 MiB de RAM disponíveis.
+  Amostra ociosa dos contêineres: Caddy 13 MiB, API 62 MiB, worker 56 MiB e
+  PostgreSQL 38 MiB. A amostra não representa teste de carga.
+
+HTTPS é privado e usa CA interna. Não é um endpoint público nem uma conexão
+com WhatsApp. Reinício automático dos contêineres e serviços Docker está
+configurado; nenhum reboot da VPS foi realizado.
+
+## Preparação do backup externo autorizada
+
+Restic 0.19.1 e rclone 1.76.0 instalados dos projetos oficiais, com checksums
+e assinaturas PGP verificados contra fingerprints fixados. Não iniciam daemons
+nem abrem portas públicas. Instalador recusa binários preexistentes.
+
+O cliente compartilhado Google do rclone será descontinuado em 2026; foi criado
+o projeto exclusivo `Church Roster Backups` para configurar cliente OAuth próprio,
+sem vincular faturamento ou criar VM/bucket/serviço pago. Somente a API do Drive
+foi habilitada. O formulário de autorização está preenchido e aguarda aceite da
+política de dados do Google pelo proprietário; credencial OAuth ainda não foi
+criada. OAuth, senha de recuperação, quota e restauração externa permanecem
+pendentes. Nenhum arquivo foi enviado ao Drive até este ponto; o timer não foi
+habilitado. O proprietário confirmou que deseja concluir o backup no Drive.
 
 ## Validação executada
 
@@ -89,17 +153,18 @@ keyboard-interactive desativados, MaxAuthTries 3 e keepalive 60/3.
    a versão corrigida 1.45.2. Pacote local não publicado é ignorado pelo PyPI audit.
 
 O novo job `production-stack` repete build, auditoria runtime e ensaio na CI.
-A conclusão deve considerar a CI do commit publicado, não somente a execução
-anterior. Dependências fixadas exigem atualização/auditoria periódica; não houve
+A [CI de 9062092](https://github.com/viniciusrodriguesai/church-roster-bot/actions/runs/43767867759)
+passou: 828 testes, um Docker optativo ignorado no job geral, 30 testes após
+importação e um ensaio completo no job production-stack. Dependências fixadas
+exigem atualização/auditoria periódica; não houve
 varredura de vulnerabilidades dos pacotes do sistema operacional da imagem.
 
 ## Pendências para operar 24 horas
 
 1. Autorizar/aplicar endurecimento SSH com console e rollback; atualmente adiado.
-2. Autorizar instalação Docker (inicia daemon e altera rede de contêineres),
-   revisar versões/espaço e verificar SSH/UFW após a instalação.
-3. Definir endereço HTTPS e autorizar ensaio permanente com dados fictícios;
-   inicialmente em loopback, sem abrir firewall e sem Meta.
+2. Instalação Docker concluída; manter acompanhamento de versões e espaço.
+3. Ensaio privado autorizado e implantado em loopback; endereço público e
+   exposição de portas continuam dependentes de decisão/autorização separada.
 4. Autorizar OAuth do Drive, verificar quota, inicializar repositório cifrado,
    guardar recuperação fora da VPS e restaurar backup externo de verdade.
 5. Autorizar monitoramento/agendamento e política de retenção; escolher canal

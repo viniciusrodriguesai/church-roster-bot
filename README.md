@@ -1,6 +1,6 @@
 # Church Roster Bot
 
-Bot open source para escalas de voluntários pelo WhatsApp. **Estado: Fases 1–3 integradas; Fases 4.1 e 4.2 implementadas na branch de desenvolvimento. Nenhum número real da Meta foi conectado ou testado.** O Diaconato é o primeiro ministério. Não há painel web.
+Bot open source para escalas de voluntários pelo WhatsApp. **Estado: Fases 1–3 integradas; Fases 4.1 e 4.2 implementadas; Fase 4.3 com ensaio privado ativo na VPS e pendências operacionais registradas na branch de desenvolvimento. Nenhum número real da Meta foi conectado ou testado.** O Diaconato é o primeiro ministério. Não há painel web.
 
 ## O que funciona
 
@@ -53,6 +53,8 @@ A [Fase 4.3 na HostHatch x86_64](docs/phase-4-3-hosthatch.md) prepara Docker,
 PostgreSQL 17 com TLS, FastAPI, worker único, Caddy e backup externo cifrado.
 O Compose de produção é separado do desenvolvimento; publicação, alterações
 críticas e ativação dos backups dependem de revisão e autorização operacional.
+O [relatório de execução](docs/phase-4-3-execution.md) registra a implantação
+privada autorizada, os testes e o estado das pendências de SSH e backup externo.
 
 Configure a senha local em `.env` e no `DATABASE_URL` antes de usar o Compose. O arquivo `.env.example` contém somente exemplos. Com Docker Desktop ativo:
 
