@@ -31,6 +31,8 @@ class WhatsAppClient:
         self.transport = transport
 
     def send(self, recipient: str, payload: dict) -> str:
+        if not self.settings.whatsapp_delivery_enabled:
+            raise CredentialsMissingError("WhatsApp delivery is disabled")
         token = self.settings.whatsapp_access_token.get_secret_value()
         if not token or not self.settings.whatsapp_phone_number_id:
             raise CredentialsMissingError("WhatsApp credentials are not configured")

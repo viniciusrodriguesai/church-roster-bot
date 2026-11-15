@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     db_pool_timeout_seconds: float = Field(default=10, ge=0.05, le=60)
     db_pool_recycle_seconds: int = Field(default=1800, ge=30, le=86400)
     whatsapp_access_token: SecretStr = SecretStr("")
+    whatsapp_delivery_enabled: bool = True
     whatsapp_phone_number_id: str = ""
     whatsapp_verify_token: SecretStr = SecretStr("")
     meta_app_secret: SecretStr = SecretStr("")
