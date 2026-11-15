@@ -2,7 +2,7 @@
 
 import hashlib
 import sqlite3
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack, closing, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -121,7 +121,7 @@ def sqlite_snapshot(path: Path, *, upgrade_copy: bool = False):
                 raise TransferError("source_upgrade_copy_required")
             temporary = Path(stack.enter_context(TemporaryDirectory(prefix="roster-transfer-")))
             copy_path = temporary / "prepared.sqlite3"
-            with sqlite3.connect(copy_path) as target:
+            with closing(sqlite3.connect(copy_path)) as target:
                 original.connection.driver_connection.backup(target)
             copy_engine = create_engine(
                 URL.create("sqlite+pysqlite", database=str(copy_path)), hide_parameters=True
